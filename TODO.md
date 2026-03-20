@@ -295,6 +295,6 @@
 - [ ] 端到端功能测试
 
 ### 8.3 打包部署
-- [ ] 配置GitHub Actions iOS打包
-- [ ] 配置本地Android打包
+- [x] 配置GitHub Actions iOS打包
+- [x] 配置本地Android打包
 - [ ] 配置社群分发流程

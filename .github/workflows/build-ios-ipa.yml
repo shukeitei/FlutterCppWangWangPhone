@@ -1,0 +1,62 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios-ipa:
+    name: 构建 iOS 未签名 IPA
+    runs-on: macos-14
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: wangwang_phone
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.6'
+          channel: stable
+          cache: true
+
+      - name: 输出 Flutter 版本
+        run: flutter --version
+
+      - name: 拉取 Flutter 依赖
+        run: flutter pub get
+
+      - name: 执行静态检查
+        run: flutter analyze
+
+      - name: 安装 CocoaPods
+        run: |
+          sudo gem install cocoapods
+          pod repo update
+
+      - name: 安装 iOS Pods 依赖
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: 生成 iOS 未签名构建产物
+        run: flutter build ios --release --no-codesign
+
+      - name: 打包未签名 IPA
+        run: |
+          mkdir -p build/ios/ipa_payload/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ios/ipa_payload/Payload/Runner.app
+          cd build/ios/ipa_payload
+          zip -r ../wangwang_phone_unsigned.ipa Payload
+
+      - name: 上传 iOS IPA 制品
+        uses: actions/upload-artifact@v4
+        with:
+          name: wangwang-phone-ios-ipa
+          path: wangwang_phone/build/ios/wangwang_phone_unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
