@@ -149,6 +149,49 @@ void main() {
     expect(find.text('温度走势'), findsOneWidget);
   });
 
+  testWidgets('点击微信图标后进入聊天应用并显示四个Tab', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('微信'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('chat_app_page')), findsOneWidget);
+    expect(find.text('聊天'), findsWidgets);
+    expect(find.text('联系人'), findsOneWidget);
+    expect(find.text('朋友圈'), findsOneWidget);
+    expect(find.text('我'), findsOneWidget);
+    expect(find.text('阿梨'), findsOneWidget);
+  });
+
+  testWidgets('聊天应用支持发送文字并收到角色回复', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('微信'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('chat_thread_ari')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('chat_input_field')),
+      '今天会议好多，我有点累',
+    );
+    await tester.tap(find.byKey(const Key('chat_send_button')));
+    await tester.pump();
+
+    expect(find.text('今天会议好多，我有点累'), findsOneWidget);
+    expect(find.byKey(const Key('chat_typing_indicator')), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('先抱抱你一下'), findsOneWidget);
+  });
+
   testWidgets('切换华氏度后桌面与天气详情同步更新', (WidgetTester tester) async {
     final settingsStore = MemoryWeatherSettingsStore();
 

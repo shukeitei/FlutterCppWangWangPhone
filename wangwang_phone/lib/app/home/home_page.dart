@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../chat/chat_app_page.dart';
 import '../shared/ui.dart';
 import '../weather/weather_detail_page.dart';
 import '../weather/weather_repository.dart';
@@ -162,12 +163,7 @@ class _HomePageState extends State<HomePage> {
         controller: _weatherController,
         temperatureUnitController: _temperatureUnitController,
       ),
-      WangWangAppModule.chat => _PlaceholderAppPage(
-        item: item,
-        title: '微信',
-        description: '消息列表、联系人和朋友圈入口已经打通，下一步继续接聊天数据与 AI 回复。',
-        roadmap: const ['聊天列表', '联系人导入', '朋友圈动态'],
-      ),
+      WangWangAppModule.chat => const ChatAppPage(),
       WangWangAppModule.settings => _PlaceholderAppPage(
         item: item,
         title: '设置',
