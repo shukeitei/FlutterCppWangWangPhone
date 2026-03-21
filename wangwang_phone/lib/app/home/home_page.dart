@@ -3,14 +3,20 @@ import 'package:flutter/material.dart';
 import '../shared/ui.dart';
 import '../weather/weather_detail_page.dart';
 import '../weather/weather_repository.dart';
+import '../weather/weather_settings.dart';
 import '../weather/weather_widget_card.dart';
 
 enum WangWangAppModule { chat, settings, weather }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.weatherRepository});
+  const HomePage({
+    super.key,
+    required this.weatherRepository,
+    required this.weatherSettingsStore,
+  });
 
   final WeatherRepository weatherRepository;
+  final WeatherSettingsStore weatherSettingsStore;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -18,6 +24,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late final WeatherController _weatherController;
+  late final TemperatureUnitController _temperatureUnitController;
 
   final List<_AppIconData> _items = const [
     _AppIconData(
@@ -48,11 +55,15 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _weatherController = WeatherController(repository: widget.weatherRepository)
       ..loadWeather();
+    _temperatureUnitController = TemperatureUnitController(
+      store: widget.weatherSettingsStore,
+    )..load();
   }
 
   @override
   void dispose() {
     _weatherController.dispose();
+    _temperatureUnitController.dispose();
     widget.weatherRepository.dispose();
     super.dispose();
   }
@@ -77,10 +88,14 @@ class _HomePageState extends State<HomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 AnimatedBuilder(
-                  animation: _weatherController,
+                  animation: Listenable.merge([
+                    _weatherController,
+                    _temperatureUnitController,
+                  ]),
                   builder: (context, _) {
                     return WeatherWidgetCard(
                       state: _weatherController.state,
+                      temperatureUnit: _temperatureUnitController.unit,
                       onRefresh: _weatherController.loadWeather,
                       onOpenDetail: _openWeatherPage,
                     );
@@ -145,6 +160,7 @@ class _HomePageState extends State<HomePage> {
     final page = switch (item.module) {
       WangWangAppModule.weather => WeatherDetailPage(
         controller: _weatherController,
+        temperatureUnitController: _temperatureUnitController,
       ),
       WangWangAppModule.chat => _PlaceholderAppPage(
         item: item,
@@ -164,9 +180,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openWeatherPage() {
-    Navigator.of(
-      context,
-    ).push(_buildPageRoute(WeatherDetailPage(controller: _weatherController)));
+    Navigator.of(context).push(
+      _buildPageRoute(
+        WeatherDetailPage(
+          controller: _weatherController,
+          temperatureUnitController: _temperatureUnitController,
+        ),
+      ),
+    );
   }
 }
 

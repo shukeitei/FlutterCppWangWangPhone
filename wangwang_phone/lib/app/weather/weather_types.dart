@@ -1,5 +1,54 @@
 import 'package:flutter/material.dart';
 
+enum TemperatureUnit { celsius, fahrenheit }
+
+extension TemperatureUnitPresentation on TemperatureUnit {
+  String get shortLabel {
+    return switch (this) {
+      TemperatureUnit.celsius => '°C',
+      TemperatureUnit.fahrenheit => '°F',
+    };
+  }
+
+  String get displayLabel {
+    return switch (this) {
+      TemperatureUnit.celsius => '摄氏度',
+      TemperatureUnit.fahrenheit => '华氏度',
+    };
+  }
+
+  String get preferenceValue {
+    return switch (this) {
+      TemperatureUnit.celsius => 'celsius',
+      TemperatureUnit.fahrenheit => 'fahrenheit',
+    };
+  }
+
+  int convertTemperature(int celsiusValue) {
+    return switch (this) {
+      TemperatureUnit.celsius => celsiusValue,
+      TemperatureUnit.fahrenheit => ((celsiusValue * 9) / 5 + 32).round(),
+    };
+  }
+
+  String formatTemperature(int celsiusValue) {
+    return '${convertTemperature(celsiusValue)}°';
+  }
+
+  String formatTemperatureWithUnit(int celsiusValue) {
+    return '${convertTemperature(celsiusValue)}$shortLabel';
+  }
+}
+
+extension TemperatureUnitCodec on TemperatureUnit {
+  static TemperatureUnit fromPreference(String? rawValue) {
+    return switch (rawValue) {
+      'fahrenheit' => TemperatureUnit.fahrenheit,
+      _ => TemperatureUnit.celsius,
+    };
+  }
+}
+
 class WeatherReport {
   const WeatherReport({
     required this.location,
@@ -26,8 +75,6 @@ class WeatherReport {
   int get lowTemperatureCelsius => today.minTemperature;
 
   String get summary => today.buildSummary();
-
-  String get feelsLikeLabel => '体感约${today.apparentTemperature}°';
 
   String get humidityLabel => today.humidityLabel;
 

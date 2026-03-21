@@ -2,11 +2,17 @@ import 'package:flutter/material.dart';
 
 import 'home/home_page.dart';
 import 'weather/weather_repository.dart';
+import 'weather/weather_settings.dart';
 
 class WangWangApp extends StatelessWidget {
-  const WangWangApp({super.key, required this.weatherRepository});
+  const WangWangApp({
+    super.key,
+    required this.weatherRepository,
+    required this.weatherSettingsStore,
+  });
 
   final WeatherRepository weatherRepository;
+  final WeatherSettingsStore weatherSettingsStore;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +40,10 @@ class WangWangApp extends StatelessWidget {
         ),
         scaffoldBackgroundColor: const Color(0xFF120B1B),
       ),
-      home: HomePage(weatherRepository: weatherRepository),
+      home: HomePage(
+        weatherRepository: weatherRepository,
+        weatherSettingsStore: weatherSettingsStore,
+      ),
     );
   }
 }

@@ -7,11 +7,13 @@ class WeatherWidgetCard extends StatelessWidget {
   const WeatherWidgetCard({
     super.key,
     required this.state,
+    required this.temperatureUnit,
     required this.onRefresh,
     required this.onOpenDetail,
   });
 
   final WeatherState state;
+  final TemperatureUnit temperatureUnit;
   final Future<void> Function() onRefresh;
   final VoidCallback onOpenDetail;
 
@@ -95,7 +97,9 @@ class WeatherWidgetCard extends StatelessWidget {
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             Text(
-                              '${weather.currentTemperatureCelsius}°',
+                              temperatureUnit.formatTemperatureWithUnit(
+                                weather.currentTemperatureCelsius,
+                              ),
                               style: Theme.of(context).textTheme.headlineMedium
                                   ?.copyWith(
                                     color: palette.primaryText,
@@ -115,7 +119,7 @@ class WeatherWidgetCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${weather.highTemperatureCelsius}° / ${weather.lowTemperatureCelsius}° · ${weather.summary}',
+                          '${temperatureUnit.formatTemperatureWithUnit(weather.highTemperatureCelsius)} / ${temperatureUnit.formatTemperatureWithUnit(weather.lowTemperatureCelsius)} · ${weather.summary}',
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(
                                 color: palette.secondaryText,
@@ -133,7 +137,8 @@ class WeatherWidgetCard extends StatelessWidget {
                   Expanded(
                     child: WeatherInfoChip(
                       icon: Icons.thermostat_rounded,
-                      label: weather.feelsLikeLabel,
+                      label:
+                          '体感 ${temperatureUnit.formatTemperatureWithUnit(weather.apparentTemperatureCelsius)}',
                       accentColor: accentColors.first,
                     ),
                   ),

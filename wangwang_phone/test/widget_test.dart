@@ -52,6 +52,13 @@ WeatherReport _buildFakeReport() {
   );
 }
 
+WangWangApp _buildTestApp({MemoryWeatherSettingsStore? settingsStore}) {
+  return WangWangApp(
+    weatherRepository: _FakeWeatherRepository(_buildFakeReport()),
+    weatherSettingsStore: settingsStore ?? MemoryWeatherSettingsStore(),
+  );
+}
+
 void main() {
   test('7timer天气类型映射正确', () {
     expect(
@@ -83,11 +90,7 @@ void main() {
   });
 
   testWidgets('桌面展示天气小组件与应用图标', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      WangWangApp(
-        weatherRepository: _FakeWeatherRepository(_buildFakeReport()),
-      ),
-    );
+    await tester.pumpWidget(_buildTestApp());
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -101,21 +104,13 @@ void main() {
   });
 
   testWidgets('桌面天气小组件初始展示加载状态', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      WangWangApp(
-        weatherRepository: _FakeWeatherRepository(_buildFakeReport()),
-      ),
-    );
+    await tester.pumpWidget(_buildTestApp());
 
     expect(find.text('正在加载天气...'), findsOneWidget);
   });
 
   testWidgets('点击天气图标后进入天气应用详情页', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      WangWangApp(
-        weatherRepository: _FakeWeatherRepository(_buildFakeReport()),
-      ),
-    );
+    await tester.pumpWidget(_buildTestApp());
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -136,11 +131,7 @@ void main() {
   });
 
   testWidgets('点击桌面天气卡片后进入天气详情页', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      WangWangApp(
-        weatherRepository: _FakeWeatherRepository(_buildFakeReport()),
-      ),
-    );
+    await tester.pumpWidget(_buildTestApp());
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -156,5 +147,31 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('温度走势'), findsOneWidget);
+  });
+
+  testWidgets('切换华氏度后桌面与天气详情同步更新', (WidgetTester tester) async {
+    final settingsStore = MemoryWeatherSettingsStore();
+
+    await tester.pumpWidget(_buildTestApp(settingsStore: settingsStore));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('25°C'), findsOneWidget);
+
+    await tester.tap(find.text('天气'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('temperature_unit_button')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('temperature_unit_fahrenheit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('77°F'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.arrow_back_ios_new_rounded).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('77°F'), findsOneWidget);
   });
 }

@@ -2,23 +2,30 @@ import 'package:flutter/material.dart';
 
 import '../shared/ui.dart';
 import 'weather_repository.dart';
+import 'weather_settings.dart';
 import 'weather_types.dart';
 import 'weather_widget_card.dart';
 
 /// 天气详情页直接复用桌面控制器，保证桌面卡片和 App 详情的数据刷新始终一致。
 class WeatherDetailPage extends StatelessWidget {
-  const WeatherDetailPage({super.key, required this.controller});
+  const WeatherDetailPage({
+    super.key,
+    required this.controller,
+    required this.temperatureUnitController,
+  });
 
   final WeatherController controller;
+  final TemperatureUnitController temperatureUnitController;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: controller,
+      animation: Listenable.merge([controller, temperatureUnitController]),
       builder: (context, _) {
         final state = controller.state;
         final palette = HomePalette.of(context);
         final report = state.report;
+        final temperatureUnit = temperatureUnitController.unit;
         final accentColors = (report?.weatherType ?? WeatherType.sunny)
             .colorsFor(Theme.of(context).brightness);
 
@@ -66,16 +73,31 @@ class WeatherDetailPage extends StatelessWidget {
                           onBack: () {
                             Navigator.of(context).maybePop();
                           },
-                          trailing: RoundActionButton(
-                            icon: state.isLoading
-                                ? null
-                                : Icons.refresh_rounded,
-                            progressColor: accentColors.last,
-                            onTap: state.isLoading
-                                ? null
-                                : () {
-                                    controller.loadWeather();
-                                  },
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _TemperatureUnitButton(
+                                unit: temperatureUnit,
+                                onTap: () {
+                                  _showTemperatureUnitPicker(
+                                    context: context,
+                                    controller: temperatureUnitController,
+                                  );
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              RoundActionButton(
+                                icon: state.isLoading
+                                    ? null
+                                    : Icons.refresh_rounded,
+                                progressColor: accentColors.last,
+                                onTap: state.isLoading
+                                    ? null
+                                    : () {
+                                        controller.loadWeather();
+                                      },
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(height: 18),
@@ -87,7 +109,19 @@ class WeatherDetailPage extends StatelessWidget {
                             onRetry: controller.loadWeather,
                           )
                         else if (report != null) ...[
-                          _WeatherHeroCard(report: report),
+                          _WeatherHeroCard(
+                            report: report,
+                            temperatureUnit: temperatureUnit,
+                          ),
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: WeatherInfoChip(
+                              icon: Icons.swap_horiz_rounded,
+                              label: '当前单位 ${temperatureUnit.displayLabel}',
+                              accentColor: accentColors.last,
+                            ),
+                          ),
                           const SizedBox(height: 18),
                           const SectionTitle(
                             title: '未来7天',
@@ -116,6 +150,7 @@ class WeatherDetailPage extends StatelessWidget {
                                       previousForecast,
                                     ),
                                     isToday: index == 0,
+                                    temperatureUnit: temperatureUnit,
                                   ),
                                 );
                               },
@@ -125,6 +160,7 @@ class WeatherDetailPage extends StatelessWidget {
                           _TemperatureTrendCard(
                             forecasts: report.dailyForecasts,
                             accentColors: accentColors,
+                            temperatureUnit: temperatureUnit,
                           ),
                           const SizedBox(height: 18),
                           const SectionTitle(
@@ -132,7 +168,19 @@ class WeatherDetailPage extends StatelessWidget {
                             subtitle: '基于 7timer 每日预报做展示',
                           ),
                           const SizedBox(height: 12),
-                          _WeatherMetricGrid(report: report),
+                          _WeatherMetricGrid(
+                            report: report,
+                            temperatureUnit: temperatureUnit,
+                          ),
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '当前显示温标：${temperatureUnit.displayLabel}',
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: palette.secondaryText),
+                            ),
+                          ),
                           if (state.errorMessage != null) ...[
                             const SizedBox(height: 14),
                             InlineHint(message: state.errorMessage!),
@@ -152,9 +200,10 @@ class WeatherDetailPage extends StatelessWidget {
 }
 
 class _WeatherHeroCard extends StatelessWidget {
-  const _WeatherHeroCard({required this.report});
+  const _WeatherHeroCard({required this.report, required this.temperatureUnit});
 
   final WeatherReport report;
+  final TemperatureUnit temperatureUnit;
 
   @override
   Widget build(BuildContext context) {
@@ -219,7 +268,9 @@ class _WeatherHeroCard extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           Text(
-            '${report.currentTemperatureCelsius}°',
+            temperatureUnit.formatTemperatureWithUnit(
+              report.currentTemperatureCelsius,
+            ),
             style: Theme.of(context).textTheme.displaySmall?.copyWith(
               color: palette.primaryText,
               fontWeight: FontWeight.w800,
@@ -228,7 +279,7 @@ class _WeatherHeroCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${report.weatherType.label} · 体感约 ${report.apparentTemperatureCelsius}°',
+            '${report.weatherType.label} · 体感约 ${temperatureUnit.formatTemperatureWithUnit(report.apparentTemperatureCelsius)}',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               color: palette.primaryText,
               fontWeight: FontWeight.w700,
@@ -236,7 +287,7 @@ class _WeatherHeroCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '最高 ${report.highTemperatureCelsius}° / 最低 ${report.lowTemperatureCelsius}° · ${report.summary}',
+            '最高 ${temperatureUnit.formatTemperatureWithUnit(report.highTemperatureCelsius)} / 最低 ${temperatureUnit.formatTemperatureWithUnit(report.lowTemperatureCelsius)} · ${report.summary}',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: palette.secondaryText,
               height: 1.55,
@@ -271,9 +322,13 @@ class _WeatherHeroCard extends StatelessWidget {
 }
 
 class _WeatherMetricGrid extends StatelessWidget {
-  const _WeatherMetricGrid({required this.report});
+  const _WeatherMetricGrid({
+    required this.report,
+    required this.temperatureUnit,
+  });
 
   final WeatherReport report;
+  final TemperatureUnit temperatureUnit;
 
   @override
   Widget build(BuildContext context) {
@@ -281,7 +336,9 @@ class _WeatherMetricGrid extends StatelessWidget {
       _MetricItem(
         icon: Icons.thermostat_auto_rounded,
         title: '体感参考',
-        value: '${report.apparentTemperatureCelsius}°',
+        value: temperatureUnit.formatTemperatureWithUnit(
+          report.apparentTemperatureCelsius,
+        ),
         subtitle: '根据湿度和风力估算',
       ),
       _MetricItem(
@@ -401,11 +458,13 @@ class _DailyForecastCard extends StatelessWidget {
     required this.forecast,
     required this.trend,
     required this.isToday,
+    required this.temperatureUnit,
   });
 
   final SevenTimerDailyForecast forecast;
   final TemperatureTrend trend;
   final bool isToday;
+  final TemperatureUnit temperatureUnit;
 
   @override
   Widget build(BuildContext context) {
@@ -485,7 +544,7 @@ class _DailyForecastCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${forecast.maxTemperature}° / ${forecast.minTemperature}°',
+            '${temperatureUnit.formatTemperatureWithUnit(forecast.maxTemperature)} / ${temperatureUnit.formatTemperatureWithUnit(forecast.minTemperature)}',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: palette.secondaryText,
               fontWeight: FontWeight.w600,
@@ -508,10 +567,12 @@ class _TemperatureTrendCard extends StatelessWidget {
   const _TemperatureTrendCard({
     required this.forecasts,
     required this.accentColors,
+    required this.temperatureUnit,
   });
 
   final List<SevenTimerDailyForecast> forecasts;
   final List<Color> accentColors;
+  final TemperatureUnit temperatureUnit;
 
   @override
   Widget build(BuildContext context) {
@@ -543,6 +604,7 @@ class _TemperatureTrendCard extends StatelessWidget {
             child: CustomPaint(
               painter: _TemperatureTrendPainter(
                 forecasts: forecasts,
+                temperatureUnit: temperatureUnit,
                 lineColor: accentColors.last,
                 fillColor: accentColors.first.withValues(alpha: 0.14),
                 labelColor: palette.secondaryText,
@@ -559,6 +621,7 @@ class _TemperatureTrendCard extends StatelessWidget {
 class _TemperatureTrendPainter extends CustomPainter {
   const _TemperatureTrendPainter({
     required this.forecasts,
+    required this.temperatureUnit,
     required this.lineColor,
     required this.fillColor,
     required this.labelColor,
@@ -566,6 +629,7 @@ class _TemperatureTrendPainter extends CustomPainter {
   });
 
   final List<SevenTimerDailyForecast> forecasts;
+  final TemperatureUnit temperatureUnit;
   final Color lineColor;
   final Color fillColor;
   final Color labelColor;
@@ -645,7 +709,9 @@ class _TemperatureTrendPainter extends CustomPainter {
 
       final temperaturePainter = TextPainter(
         text: TextSpan(
-          text: '${forecasts[index].averageTemperature}°',
+          text: temperatureUnit.formatTemperatureWithUnit(
+            forecasts[index].averageTemperature,
+          ),
           style: TextStyle(
             color: lineColor,
             fontWeight: FontWeight.w700,
@@ -683,9 +749,110 @@ class _TemperatureTrendPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _TemperatureTrendPainter oldDelegate) {
     return oldDelegate.forecasts != forecasts ||
+        oldDelegate.temperatureUnit != temperatureUnit ||
         oldDelegate.lineColor != lineColor ||
         oldDelegate.fillColor != fillColor ||
         oldDelegate.labelColor != labelColor ||
         oldDelegate.pointColor != pointColor;
   }
+}
+
+class _TemperatureUnitButton extends StatelessWidget {
+  const _TemperatureUnitButton({required this.unit, required this.onTap});
+
+  final TemperatureUnit unit;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const Key('temperature_unit_button'),
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 56),
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: palette.iconSurface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: palette.borderColor),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            unit.shortLabel,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: palette.primaryText,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _showTemperatureUnitPicker({
+  required BuildContext context,
+  required TemperatureUnitController controller,
+}) async {
+  final currentUnit = controller.unit;
+  final selectedUnit = await showModalBottomSheet<TemperatureUnit>(
+    context: context,
+    showDragHandle: true,
+    builder: (context) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '选择温度单位',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '切换后桌面小组件和天气应用会同步刷新显示。',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: HomePalette.of(context).secondaryText,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 14),
+              ...TemperatureUnit.values.map(
+                (unit) => ListTile(
+                  key: Key('temperature_unit_${unit.preferenceValue}'),
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    currentUnit == unit
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_off_rounded,
+                  ),
+                  title: Text(unit.displayLabel),
+                  subtitle: Text(unit.shortLabel),
+                  onTap: () {
+                    Navigator.of(context).pop(unit);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+  if (selectedUnit == null) {
+    return;
+  }
+
+  await controller.selectUnit(selectedUnit);
 }
