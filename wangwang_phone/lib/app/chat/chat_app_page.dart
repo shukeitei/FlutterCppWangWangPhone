@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../shared/ui.dart';
+import 'chat_context_debug_page.dart';
 import 'chat_contact_editor_page.dart';
 import 'chat_controller.dart';
 import 'chat_message_payloads.dart';
@@ -306,23 +307,33 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                   _ChatShellHeader(
                     title: widget.contact.name,
                     subtitle: widget.contact.statusLabel,
-                    trailing: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: widget.contact.avatarColor.withValues(
-                          alpha: 0.16,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        RoundActionButton(
+                          icon: Icons.dataset_linked_rounded,
+                          onTap: _openContextDebug,
                         ),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        widget.contact.emoji,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
+                        const SizedBox(width: 8),
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: widget.contact.avatarColor.withValues(
+                              alpha: 0.16,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            widget.contact.emoji,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                     onBack: () {
                       Navigator.of(context).maybePop();
@@ -432,6 +443,16 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
         curve: Curves.easeOutCubic,
       );
     });
+  }
+
+  void _openContextDebug() {
+    final bundle = widget.controller.buildContextBundle(
+      contactId: widget.contact.id,
+      latestUserInput: _inputController.text,
+    );
+    Navigator.of(
+      context,
+    ).push(_buildRoute(ChatContextDebugPage(bundle: bundle)));
   }
 }
 

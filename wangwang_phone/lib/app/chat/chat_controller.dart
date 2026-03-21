@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'chat_context.dart';
 import 'chat_message_payloads.dart';
 import 'chat_models.dart';
 
@@ -19,7 +20,23 @@ class ChatAppController extends ChangeNotifier {
       _memories = List<ChatMemoryEntry>.from(ChatSeedData.memories),
       _diaries = List<ChatDiaryEntry>.from(ChatSeedData.diaries),
       _thoughts = List<ChatThoughtEntry>.from(ChatSeedData.thoughts),
-      _systemEntries = List<ChatSystemEntry>.from(ChatSeedData.systemEntries);
+      _systemEntries = List<ChatSystemEntry>.from(ChatSeedData.systemEntries),
+      _contextConfig = const ChatContextConfig(
+        mainSystemPrompt:
+            '你是汪汪机里的 AI 角色，需要长期稳定保持人设，优先提供情绪陪伴、日常聊天和轻社交互动。回复要自然口语化，避免说教和空泛鼓励。',
+        userPersona: '用户是汪汪机的主人，偏好被温柔接住、被认真倾听，也乐于收藏细腻的陪伴瞬间。',
+        worldBook: '汪汪机是一个完全虚拟的社交世界。所有角色、聊天、朋友圈、记忆和日记都发生在这个虚拟系统中，不对应真实外部平台。',
+        preset: '回复尽量短而有温度。优先延续对话情绪，必要时可以发动作、表情、图片描述、红包、转账、朋友圈事件和隐藏记录。',
+        maxRecentMessages: 6,
+      ),
+      _emojiCatalog = const [
+        ChatEmojiEntry(id: 'hug', symbol: '🥹', description: '安抚和抱抱'),
+        ChatEmojiEntry(id: 'moon', symbol: '🌙', description: '晚安和夜聊'),
+        ChatEmojiEntry(id: 'bread', symbol: '🥐', description: '吃饭和生活感'),
+        ChatEmojiEntry(id: 'sparkle', symbol: '✨', description: '灵感和开心'),
+      ],
+      _contextAssembler = const ChatContextAssembler(),
+      _summaryGenerator = const ChatSummaryGenerator();
 
   final List<ChatContact> _contacts;
   final Map<String, ChatThread> _threads;
@@ -31,7 +48,12 @@ class ChatAppController extends ChangeNotifier {
   final List<ChatDiaryEntry> _diaries;
   final List<ChatThoughtEntry> _thoughts;
   final List<ChatSystemEntry> _systemEntries;
+  final ChatContextConfig _contextConfig;
+  final List<ChatEmojiEntry> _emojiCatalog;
+  final ChatContextAssembler _contextAssembler;
+  final ChatSummaryGenerator _summaryGenerator;
   final Set<String> _typingContacts = <String>{};
+  final Map<String, ChatContextBundle> _lastContextBundles = {};
 
   ChatTab _currentTab = ChatTab.chats;
   String? _activeConversationId;
@@ -40,6 +62,11 @@ class ChatAppController extends ChangeNotifier {
   ChatTab get currentTab => _currentTab;
 
   UserProfile get profile => _profile;
+
+  ChatContextConfig get contextConfig => _contextConfig;
+
+  List<ChatEmojiEntry> get emojiCatalog =>
+      List<ChatEmojiEntry>.unmodifiable(_emojiCatalog);
 
   List<ChatSummaryEntry> get summaries {
     final items = _summaries.values.toList()
@@ -99,6 +126,9 @@ class ChatAppController extends ChangeNotifier {
   }
 
   ChatSummaryEntry? summaryFor(String contactId) => _summaries[contactId];
+
+  ChatContextBundle? lastContextBundleFor(String contactId) =>
+      _lastContextBundles[contactId];
 
   List<ChatMessage> messagesFor(String contactId) {
     return List<ChatMessage>.unmodifiable(_messages[contactId] ?? const []);
@@ -207,6 +237,29 @@ class ChatAppController extends ChangeNotifier {
     );
   }
 
+  ChatContextBundle buildContextBundle({
+    required String contactId,
+    required String latestUserInput,
+  }) {
+    final contact = contactById(contactId);
+    final bundle = _contextAssembler.build(
+      ChatContextAssemblerInput(
+        generatedAt: DateTime.now(),
+        contact: contact,
+        config: _contextConfig,
+        summary: summaryFor(contactId),
+        memories: _memories
+            .where((entry) => entry.contactId == contactId)
+            .toList(),
+        recentMessages: messagesFor(contactId),
+        latestUserInput: latestUserInput,
+        availableEmojis: _emojiCatalog,
+      ),
+    );
+    _lastContextBundles[contactId] = bundle;
+    return bundle;
+  }
+
   /// 统一承接结构化 payload。可见类型会进聊天列表，隐藏类型则进入各自的数据存储。
   void ingestStructuredPayloads({
     required String contactId,
@@ -311,6 +364,8 @@ class ChatAppController extends ChangeNotifier {
     _typingContacts.add(contactId);
     notifyListeners();
 
+    buildContextBundle(contactId: contactId, latestUserInput: trimmed);
+
     await Future<void>.delayed(const Duration(milliseconds: 850));
     if (_disposed) {
       return;
@@ -324,6 +379,13 @@ class ChatAppController extends ChangeNotifier {
       userMessage: trimmed,
     );
     ingestStructuredPayloads(contactId: contactId, payloads: replyPayloads);
+    final hasExplicitSummary = replyPayloads.any(
+      (payload) => payload['type']?.toString().toLowerCase() == 'summary',
+    );
+    if (!hasExplicitSummary) {
+      _refreshDynamicSummary(contactId);
+    }
+    buildContextBundle(contactId: contactId, latestUserInput: trimmed);
   }
 
   /// 根据角色设定和用户最后一句话拼出一条稳定可预测的回复，便于后续替换成真实 AI 接口。
@@ -696,6 +758,19 @@ class ChatAppController extends ChangeNotifier {
       }
     }
     return _moments.isNotEmpty ? _moments.first.id : null;
+  }
+
+  void _refreshDynamicSummary(String contactId) {
+    final contact = contactById(contactId);
+    final summaryContent = _summaryGenerator.generate(
+      contact: contact,
+      messages: messagesFor(contactId),
+    );
+    _summaries[contactId] = ChatSummaryEntry(
+      contactId: contactId,
+      content: summaryContent,
+      updatedAt: DateTime.now(),
+    );
   }
 
   void _updateMoneyCardStatus({

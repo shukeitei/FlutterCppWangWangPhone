@@ -175,6 +175,63 @@ void main() {
     expect(controller.moments.first.comments.last.content, contains('气氛很温柔'));
   });
 
+  test('上下文组装器会按固定顺序拼接system prompt并注入memory', () {
+    final controller = ChatAppController.seeded();
+
+    final bundle = controller.buildContextBundle(
+      contactId: 'ari',
+      latestUserInput: '你先帮我整理一下最近的聊天重点',
+    );
+
+    expect(bundle.systemSections.map((section) => section.title).toList(), [
+      '系统日期',
+      '系统时间',
+      '主系统提示词',
+      'AI角色人设',
+      '用户人设',
+      '世界书',
+      '预设',
+      '动态summary',
+      'AI角色记忆memory',
+      '可用表情包列表',
+    ]);
+    expect(bundle.systemPrompt, contains('世界书'));
+    expect(bundle.systemPrompt, contains('你怕在高压时被催促'));
+    expect(bundle.userPrompt, contains('当前用户输入'));
+  });
+
+  test('上下文组装器会按配置截取聊天记录并由summary承接更早内容', () {
+    const config = ChatContextConfig(
+      mainSystemPrompt: '主系统提示',
+      userPersona: '用户人设',
+      worldBook: '世界书',
+      preset: '预设',
+      maxRecentMessages: 2,
+    );
+
+    final contact = ChatSeedData.contacts.first;
+    final bundle = const ChatContextAssembler().build(
+      ChatContextAssemblerInput(
+        generatedAt: DateTime(2026, 3, 21, 21, 0),
+        contact: contact,
+        config: config,
+        summary: ChatSeedData.summaries['ari'],
+        memories: ChatSeedData.memories
+            .where((entry) => entry.contactId == 'ari')
+            .toList(),
+        recentMessages: ChatSeedData.messages['ari']!,
+        latestUserInput: '继续聊工作',
+        availableEmojis: const [
+          ChatEmojiEntry(id: 'hug', symbol: '🥹', description: '抱抱'),
+        ],
+      ),
+    );
+
+    expect(bundle.selectedMessages.length, 2);
+    expect(bundle.usedSummaryBridge, isTrue);
+    expect(bundle.userPrompt, contains('更早聊天内容已由 summary 承接'));
+  });
+
   testWidgets('桌面展示天气小组件与应用图标', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
     await tester.pump();
@@ -249,6 +306,24 @@ void main() {
     expect(find.text('朋友圈'), findsOneWidget);
     expect(find.text('我'), findsOneWidget);
     expect(find.text('阿梨'), findsOneWidget);
+  });
+
+  testWidgets('聊天详情支持打开上下文调试页', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home_app_chat')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('chat_thread_ari')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.dataset_linked_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.text('上下文调试'), findsOneWidget);
+    expect(find.text('System Prompt'), findsOneWidget);
   });
 
   testWidgets('首页可打开记忆与日记应用', (WidgetTester tester) async {
