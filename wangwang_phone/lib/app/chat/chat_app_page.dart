@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../shared/ui.dart';
 import 'chat_contact_editor_page.dart';
 import 'chat_controller.dart';
+import 'chat_message_payloads.dart';
 import 'chat_moment_composer_page.dart';
 import 'chat_models.dart';
 
@@ -352,6 +353,7 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
 
                         final message = messages[index];
                         return _ChatMessageBubble(
+                          controller: widget.controller,
                           message: message,
                           contact: widget.contact,
                         );
@@ -1213,8 +1215,13 @@ class _ChatShellHeader extends StatelessWidget {
 }
 
 class _ChatMessageBubble extends StatelessWidget {
-  const _ChatMessageBubble({required this.message, required this.contact});
+  const _ChatMessageBubble({
+    required this.controller,
+    required this.message,
+    required this.contact,
+  });
 
+  final ChatAppController controller;
   final ChatMessage message;
   final ChatContact contact;
 
@@ -1222,6 +1229,30 @@ class _ChatMessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = ChatPalette.of(context);
     final isUser = message.sender == ChatMessageSender.user;
+    final body = message.body;
+
+    if (body is ActionMessageBody) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: palette.navigationSurface,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              body.text,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: palette.secondaryText,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -1236,29 +1267,329 @@ class _ChatMessageBubble extends StatelessWidget {
             const SizedBox(width: 8),
           ],
           Flexible(
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 280),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: _MessageBodyCard(
+              palette: palette,
+              isUser: isUser,
+              message: message,
+              controller: controller,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MessageBodyCard extends StatelessWidget {
+  const _MessageBodyCard({
+    required this.palette,
+    required this.isUser,
+    required this.message,
+    required this.controller,
+  });
+
+  final ChatPalette palette;
+  final bool isUser;
+  final ChatMessage message;
+  final ChatAppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final body = message.body;
+
+    if (body is EmojiMessageBody) {
+      return _MessageBubbleShell(
+        palette: palette,
+        isUser: isUser,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(body.emoji, style: const TextStyle(fontSize: 34)),
+            const SizedBox(height: 8),
+            Text(
+              body.description,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: isUser ? Colors.white : palette.primaryText,
+                height: 1.55,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (body is ImageMessageBody) {
+      return _MessageBubbleShell(
+        palette: palette,
+        isUser: isUser,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              height: 132,
               decoration: BoxDecoration(
-                color: isUser ? palette.userBubble : palette.aiBubble,
-                borderRadius: BorderRadius.circular(22),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 10,
-                    offset: const Offset(0, 5),
+                gradient: LinearGradient(
+                  colors: [
+                    palette.accentColor.withValues(alpha: 0.75),
+                    palette.secondaryAccentColor.withValues(alpha: 0.92),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      body.themeLabel,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    body.title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ],
               ),
-              child: Text(
-                message.text,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: isUser ? Colors.white : palette.primaryText,
-                  height: 1.55,
-                ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              body.description,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: isUser ? Colors.white : palette.primaryText,
+                height: 1.55,
               ),
             ),
+          ],
+        ),
+      );
+    }
+
+    if (body is MoneyCardMessageBody) {
+      return _MoneyMessageCard(
+        palette: palette,
+        body: body,
+        message: message,
+        controller: controller,
+      );
+    }
+
+    final text = switch (body) {
+      WordMessageBody() => body.text,
+      ActionMessageBody() => body.text,
+      _ => body.previewText,
+    };
+
+    return _MessageBubbleShell(
+      palette: palette,
+      isUser: isUser,
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+          color: isUser ? Colors.white : palette.primaryText,
+          height: 1.55,
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageBubbleShell extends StatelessWidget {
+  const _MessageBubbleShell({
+    required this.palette,
+    required this.isUser,
+    required this.child,
+  });
+
+  final ChatPalette palette;
+  final bool isUser;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 280),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isUser ? palette.userBubble : palette.aiBubble,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
           ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _MoneyMessageCard extends StatelessWidget {
+  const _MoneyMessageCard({
+    required this.palette,
+    required this.body,
+    required this.message,
+    required this.controller,
+  });
+
+  final ChatPalette palette;
+  final MoneyCardMessageBody body;
+  final ChatMessage message;
+  final ChatAppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final isRedPacket = body is RedPacketMessageBody;
+    final accentColor = isRedPacket
+        ? const Color(0xFFFF8B5C)
+        : palette.secondaryAccentColor;
+
+    return _MessageBubbleShell(
+      palette: palette,
+      isUser: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  isRedPacket
+                      ? Icons.redeem_rounded
+                      : Icons.account_balance_wallet_rounded,
+                  color: accentColor,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      body.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: palette.primaryText,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      body.amountLabel,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(
+                            color: accentColor,
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            body.note,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: palette.primaryText,
+              height: 1.55,
+            ),
+          ),
+          if (body is RedPacketMessageBody) ...[
+            const SizedBox(height: 8),
+            Text(
+              (body as RedPacketMessageBody).blessing,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: palette.secondaryText,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          if (body.isPending)
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    key: Key('reject_money_${message.id}'),
+                    onPressed: () {
+                      controller.rejectMoneyCard(
+                        contactId: message.contactId,
+                        messageId: message.id,
+                      );
+                    },
+                    child: const Text('拒绝'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    key: Key('accept_money_${message.id}'),
+                    onPressed: () {
+                      controller.acceptMoneyCard(
+                        contactId: message.contactId,
+                        messageId: message.id,
+                      );
+                    },
+                    style: FilledButton.styleFrom(backgroundColor: accentColor),
+                    child: Text(isRedPacket ? '收下红包' : '确认收款'),
+                  ),
+                ),
+              ],
+            )
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    body.status == TransactionCardStatus.accepted
+                        ? Icons.check_circle_rounded
+                        : Icons.cancel_rounded,
+                    color: accentColor,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    body.status.label,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: palette.primaryText,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

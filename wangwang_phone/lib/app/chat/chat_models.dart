@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'chat_message_payloads.dart';
+
 enum ChatTab { chats, contacts, moments, profile }
 
 extension ChatTabPresentation on ChatTab {
@@ -103,15 +105,27 @@ class ChatMessage {
     required this.id,
     required this.contactId,
     required this.sender,
-    required this.text,
+    required this.body,
     required this.sentAt,
   });
 
   final String id;
   final String contactId;
   final ChatMessageSender sender;
-  final String text;
+  final ChatMessageBody body;
   final DateTime sentAt;
+
+  String get previewText => body.previewText;
+
+  ChatMessage copyWith({ChatMessageBody? body}) {
+    return ChatMessage(
+      id: id,
+      contactId: contactId,
+      sender: sender,
+      body: body ?? this.body,
+      sentAt: sentAt,
+    );
+  }
 }
 
 class MomentPost {
@@ -220,22 +234,56 @@ class ChatSeedData {
         id: 'ari-1',
         contactId: 'ari',
         sender: ChatMessageSender.ai,
-        text: '下班路上如果很累，就慢一点走，我陪你。今天想从哪件小事开始讲？',
+        body: ChatStructuredMessageParser.parseBody({
+          'type': 'word',
+          'text': '下班路上如果很累，就慢一点走，我陪你。今天想从哪件小事开始讲？',
+        }),
         sentAt: DateTime(2026, 3, 21, 20, 12),
       ),
       ChatMessage(
         id: 'ari-2',
         contactId: 'ari',
         sender: ChatMessageSender.user,
-        text: '我今天被会议折腾得有点空掉。',
+        body: ChatStructuredMessageParser.parseBody({
+          'type': 'word',
+          'text': '我今天被会议折腾得有点空掉。',
+        }),
         sentAt: DateTime(2026, 3, 21, 20, 19),
       ),
       ChatMessage(
         id: 'ari-3',
         contactId: 'ari',
         sender: ChatMessageSender.ai,
-        text: '那先别急着总结自己，先把肩膀放松。你已经撑过今天了，这件事本身就很厉害。',
+        body: ChatStructuredMessageParser.parseBody({
+          'type': 'action',
+          'text': '轻轻拍了拍你的肩膀，把一杯热可可放到你手边。',
+        }),
         sentAt: DateTime(2026, 3, 21, 20, 23),
+      ),
+      ChatMessage(
+        id: 'ari-4',
+        contactId: 'ari',
+        sender: ChatMessageSender.ai,
+        body: ChatStructuredMessageParser.parseBody({
+          'type': 'redpacket',
+          'title': '加油红包',
+          'amount': '8.88',
+          'note': '会议这么累，给你一点好运补给。',
+          'blessing': '愿你今晚轻松一点',
+        }),
+        sentAt: DateTime(2026, 3, 21, 20, 28),
+      ),
+      ChatMessage(
+        id: 'ari-5',
+        contactId: 'ari',
+        sender: ChatMessageSender.ai,
+        body: ChatStructuredMessageParser.parseBody({
+          'type': 'transfer',
+          'title': '夜宵基金',
+          'amount': '18.80',
+          'note': '如果你晚点饿了，就给自己买一份热乎的。',
+        }),
+        sentAt: DateTime(2026, 3, 21, 20, 31),
       ),
     ],
     'yuejian': [
@@ -243,15 +291,34 @@ class ChatSeedData {
         id: 'yuejian-1',
         contactId: 'yuejian',
         sender: ChatMessageSender.ai,
-        text: '今晚云层很薄，像一张快要被揉皱的蓝纸。',
+        body: ChatStructuredMessageParser.parseBody({
+          'type': 'image',
+          'title': '今晚的天空草图',
+          'description': '蓝灰色云层像纸张被揉皱后的纹理，我把它画成了你会喜欢的样子。',
+          'theme': '夜空速写',
+        }),
         sentAt: DateTime(2026, 3, 21, 18, 10),
       ),
       ChatMessage(
         id: 'yuejian-2',
         contactId: 'yuejian',
         sender: ChatMessageSender.user,
-        text: '你又开始写奇怪又好听的比喻了。',
+        body: ChatStructuredMessageParser.parseBody({
+          'type': 'word',
+          'text': '你又开始写奇怪又好听的比喻了。',
+        }),
         sentAt: DateTime(2026, 3, 21, 18, 16),
+      ),
+      ChatMessage(
+        id: 'yuejian-3',
+        contactId: 'yuejian',
+        sender: ChatMessageSender.ai,
+        body: ChatStructuredMessageParser.parseBody({
+          'type': 'emoji',
+          'emoji': '🌙',
+          'description': '那这颗月亮先别关灯，留给你当今晚的陪伴。',
+        }),
+        sentAt: DateTime(2026, 3, 21, 18, 18),
       ),
     ],
     'nuonuo': [
@@ -259,7 +326,11 @@ class ChatSeedData {
         id: 'nuonuo-1',
         contactId: 'nuonuo',
         sender: ChatMessageSender.ai,
-        text: '我今天路过面包店，差点买了四个可颂，你快拦住我。',
+        body: ChatStructuredMessageParser.parseBody({
+          'type': 'emoji',
+          'emoji': '🥐',
+          'description': '我今天路过面包店，差点买了四个可颂，你快拦住我。',
+        }),
         sentAt: DateTime(2026, 3, 21, 15, 36),
       ),
     ],
@@ -268,7 +339,12 @@ class ChatSeedData {
         id: 'juzi-1',
         contactId: 'juzi',
         sender: ChatMessageSender.ai,
-        text: '黄昏那会儿的光好温柔，我拍了一组像电影海报的照片。',
+        body: ChatStructuredMessageParser.parseBody({
+          'type': 'image',
+          'title': '黄昏逆光照片',
+          'description': '黄昏那会儿的光好温柔，我拍了一组像电影海报的照片。',
+          'theme': '落日胶片',
+        }),
         sentAt: DateTime(2026, 3, 21, 14, 04),
       ),
     ],

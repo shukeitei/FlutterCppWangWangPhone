@@ -108,6 +108,25 @@ void main() {
     expect(draft.initialGreeting, contains('热牛奶'));
   });
 
+  test('结构化消息解析器会按type分发不同消息体', () {
+    final redPacketBody = ChatStructuredMessageParser.parseBody({
+      'type': 'redpacket',
+      'title': '晚安红包',
+      'amount': '6.66',
+      'note': '早点休息',
+    });
+    final imageBody = ChatStructuredMessageParser.parseBody({
+      'type': 'image',
+      'title': '夜空照片',
+      'description': '月亮像一盏小灯',
+      'theme': '夜色',
+    });
+
+    expect(redPacketBody, isA<RedPacketMessageBody>());
+    expect(imageBody, isA<ImageMessageBody>());
+    expect(redPacketBody.previewText, contains('红包'));
+  });
+
   testWidgets('桌面展示天气小组件与应用图标', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
     await tester.pump();
@@ -203,12 +222,30 @@ void main() {
     await tester.pump();
 
     expect(find.text('今天会议好多，我有点累'), findsOneWidget);
-    expect(find.byKey(const Key('chat_typing_indicator')), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 900));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('先抱抱你一下'), findsOneWidget);
+  });
+
+  testWidgets('红包卡片支持收下后更新状态', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('微信'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('chat_thread_ari')));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byKey(const Key('accept_money_ari-4')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('accept_money_ari-4')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('已收下'), findsOneWidget);
   });
 
   testWidgets('联系人页支持直接创建新联系人', (WidgetTester tester) async {

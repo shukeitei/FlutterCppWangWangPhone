@@ -6,6 +6,7 @@ import 'app/weather/weather_settings.dart';
 
 export 'app/app.dart';
 export 'app/chat/chat_controller.dart';
+export 'app/chat/chat_message_payloads.dart';
 export 'app/chat/chat_models.dart';
 export 'app/weather/weather_repository.dart';
 export 'app/weather/weather_settings.dart';

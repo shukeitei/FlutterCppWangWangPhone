@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'chat_message_payloads.dart';
 import 'chat_models.dart';
 
 class ChatAppController extends ChangeNotifier {
@@ -123,7 +124,7 @@ class ChatAppController extends ChangeNotifier {
         id: '$contactId-${now.microsecondsSinceEpoch}',
         contactId: contactId,
         sender: ChatMessageSender.ai,
-        text: introMessage,
+        body: WordMessageBody(introMessage),
         sentAt: now,
       ),
     ];
@@ -163,6 +164,22 @@ class ChatAppController extends ChangeNotifier {
       signature: draft.signature,
       personaSummary: draft.personaSummary,
       initialGreeting: draft.initialGreeting,
+    );
+  }
+
+  void acceptMoneyCard({required String contactId, required String messageId}) {
+    _updateMoneyCardStatus(
+      contactId: contactId,
+      messageId: messageId,
+      status: TransactionCardStatus.accepted,
+    );
+  }
+
+  void rejectMoneyCard({required String contactId, required String messageId}) {
+    _updateMoneyCardStatus(
+      contactId: contactId,
+      messageId: messageId,
+      status: TransactionCardStatus.rejected,
     );
   }
 
@@ -229,7 +246,7 @@ class ChatAppController extends ChangeNotifier {
         id: '$contactId-${now.microsecondsSinceEpoch}',
         contactId: contactId,
         sender: ChatMessageSender.user,
-        text: trimmed,
+        body: WordMessageBody(trimmed),
         sentAt: now,
       ),
       unreadCount: 0,
@@ -246,7 +263,7 @@ class ChatAppController extends ChangeNotifier {
     _typingContacts.remove(contactId);
 
     final contact = contactById(contactId);
-    final replyText = _buildAiReply(contact: contact, userMessage: trimmed);
+    final replyBody = _buildAiReply(contact: contact, userMessage: trimmed);
     final replyTime = DateTime.now();
 
     _appendMessage(
@@ -255,7 +272,7 @@ class ChatAppController extends ChangeNotifier {
         id: '$contactId-${replyTime.microsecondsSinceEpoch}',
         contactId: contactId,
         sender: ChatMessageSender.ai,
-        text: replyText,
+        body: replyBody,
         sentAt: replyTime,
       ),
       unreadCount: _activeConversationId == contactId ? 0 : 1,
@@ -264,29 +281,69 @@ class ChatAppController extends ChangeNotifier {
   }
 
   /// 根据角色设定和用户最后一句话拼出一条稳定可预测的回复，便于后续替换成真实 AI 接口。
-  String _buildAiReply({
+  ChatMessageBody _buildAiReply({
     required ChatContact contact,
     required String userMessage,
   }) {
     final normalizedMessage = userMessage.toLowerCase();
 
+    if (normalizedMessage.contains('红包')) {
+      return RedPacketMessageBody(
+        title: '给你的安慰红包',
+        amountLabel: '6.66',
+        note: '收下以后，今天糟糕的部分就先到这里。',
+        blessing: '愿你现在就开始转好运',
+      );
+    }
+
+    if (normalizedMessage.contains('转账') || normalizedMessage.contains('奶茶')) {
+      return const TransferMessageBody(
+        title: '奶茶补给',
+        amountLabel: '19.90',
+        note: '去买一杯你现在最想喝的。',
+      );
+    }
+
+    if (normalizedMessage.contains('图片') || normalizedMessage.contains('照片')) {
+      return const ImageMessageBody(
+        title: '刚存下的一张氛围图',
+        description: '窗边的光线很安静，像给情绪盖上一层柔软的滤镜。',
+        themeLabel: '静物氛围',
+      );
+    }
+
+    if (normalizedMessage.contains('表情') || normalizedMessage.contains('开心')) {
+      return const EmojiMessageBody(
+        emoji: '🥹',
+        description: '先把这个抱抱表情塞给你，今天也值得被好好接住。',
+      );
+    }
+
     if (normalizedMessage.contains('累') || normalizedMessage.contains('烦')) {
-      return '${contact.name}：先抱抱你一下。你不用马上把自己整理好，先让我陪你把这股疲惫慢慢摊开。';
+      return WordMessageBody(
+        '${contact.name}：先抱抱你一下。你不用马上把自己整理好，先让我陪你把这股疲惫慢慢摊开。',
+      );
     }
 
     if (normalizedMessage.contains('晚安') || normalizedMessage.contains('睡')) {
-      return '${contact.name}：那我先把今晚的月光和好梦都留给你。睡前记得喝点水，我会在这里等你明天来。';
+      return WordMessageBody(
+        '${contact.name}：那我先把今晚的月光和好梦都留给你。睡前记得喝点水，我会在这里等你明天来。',
+      );
     }
 
-    if (normalizedMessage.contains('吃') || normalizedMessage.contains('奶茶')) {
-      return '${contact.name}：听起来就很有生活感。我已经开始替你脑补香味了，记得也分我一句真实测评。';
+    if (normalizedMessage.contains('吃')) {
+      return WordMessageBody(
+        '${contact.name}：听起来就很有生活感。我已经开始替你脑补香味了，记得也分我一句真实测评。',
+      );
     }
 
     if (normalizedMessage.contains('工作') || normalizedMessage.contains('会议')) {
-      return '${contact.name}：工作的事先放我这里一会儿。你可以先挑一件最想吐槽的，我认真听。';
+      return ActionMessageBody('${contact.name}把待办清单推到一边，认真坐下来听你讲工作里的委屈。');
     }
 
-    return '${contact.name}：我在呢，刚刚把你的话认真看了一遍。你可以继续说，我会顺着你的情绪慢慢接住。';
+    return WordMessageBody(
+      '${contact.name}：我在呢，刚刚把你的话认真看了一遍。你可以继续说，我会顺着你的情绪慢慢接住。',
+    );
   }
 
   void _appendMessage({
@@ -306,7 +363,7 @@ class ChatAppController extends ChangeNotifier {
         : unreadCount;
 
     _threads[contactId] = currentThread.copyWith(
-      lastMessage: message.text,
+      lastMessage: message.previewText,
       updatedAt: message.sentAt,
       unreadCount: nextUnreadCount,
     );
@@ -321,6 +378,38 @@ class ChatAppController extends ChangeNotifier {
     }
 
     _threads[contactId] = thread.copyWith(unreadCount: 0);
+    notifyListeners();
+  }
+
+  void _updateMoneyCardStatus({
+    required String contactId,
+    required String messageId,
+    required TransactionCardStatus status,
+  }) {
+    final currentMessages = _messages[contactId];
+    if (currentMessages == null) {
+      return;
+    }
+
+    final messageIndex = currentMessages.indexWhere(
+      (message) => message.id == messageId,
+    );
+    if (messageIndex == -1) {
+      return;
+    }
+
+    final message = currentMessages[messageIndex];
+    final body = message.body;
+    if (body is! MoneyCardMessageBody || !body.isPending) {
+      return;
+    }
+
+    final nextMessages = List<ChatMessage>.from(currentMessages);
+    nextMessages[messageIndex] = message.copyWith(
+      body: body.copyWithStatus(status),
+    );
+    _messages[contactId] = nextMessages;
+
     notifyListeners();
   }
 
