@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../chat/chat_app_page.dart';
+import '../chat/chat_controller.dart';
+import '../chat/memory_app_page.dart';
 import '../shared/ui.dart';
 import '../weather/weather_detail_page.dart';
 import '../weather/weather_repository.dart';
 import '../weather/weather_settings.dart';
 import '../weather/weather_widget_card.dart';
 
-enum WangWangAppModule { chat, settings, weather }
+enum WangWangAppModule { chat, memory, diary, settings, weather }
 
 class HomePage extends StatefulWidget {
   const HomePage({
@@ -26,6 +28,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final WeatherController _weatherController;
   late final TemperatureUnitController _temperatureUnitController;
+  late final ChatAppController _chatController;
 
   final List<_AppIconData> _items = const [
     _AppIconData(
@@ -34,6 +37,20 @@ class _HomePageState extends State<HomePage> {
       icon: Icons.chat_bubble_rounded,
       color: Color(0xFF5EDC7E),
       subtitle: '和 AI 好友聊天',
+    ),
+    _AppIconData(
+      module: WangWangAppModule.memory,
+      label: '记忆',
+      icon: Icons.psychology_alt_rounded,
+      color: Color(0xFFFFA25A),
+      subtitle: '查看 summary 和 memory',
+    ),
+    _AppIconData(
+      module: WangWangAppModule.diary,
+      label: '日记',
+      icon: Icons.menu_book_rounded,
+      color: Color(0xFFEF7FB0),
+      subtitle: '查看 diary 记录',
     ),
     _AppIconData(
       module: WangWangAppModule.settings,
@@ -59,12 +76,14 @@ class _HomePageState extends State<HomePage> {
     _temperatureUnitController = TemperatureUnitController(
       store: widget.weatherSettingsStore,
     )..load();
+    _chatController = ChatAppController.seeded();
   }
 
   @override
   void dispose() {
     _weatherController.dispose();
     _temperatureUnitController.dispose();
+    _chatController.dispose();
     widget.weatherRepository.dispose();
     super.dispose();
   }
@@ -163,7 +182,9 @@ class _HomePageState extends State<HomePage> {
         controller: _weatherController,
         temperatureUnitController: _temperatureUnitController,
       ),
-      WangWangAppModule.chat => const ChatAppPage(),
+      WangWangAppModule.chat => ChatAppPage(controller: _chatController),
+      WangWangAppModule.memory => MemoryAppPage(controller: _chatController),
+      WangWangAppModule.diary => DiaryAppPage(controller: _chatController),
       WangWangAppModule.settings => _PlaceholderAppPage(
         item: item,
         title: '设置',
@@ -399,6 +420,7 @@ class _AppIcon extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
+          key: Key('home_app_${item.module.name}'),
           borderRadius: BorderRadius.circular(24),
           onTap: onTap,
           child: Column(
@@ -447,6 +469,7 @@ class _DockIcon extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
+        key: Key('home_dock_${item.module.name}'),
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Container(

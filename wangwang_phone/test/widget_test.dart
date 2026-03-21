@@ -127,6 +127,54 @@ void main() {
     expect(redPacketBody.previewText, contains('红包'));
   });
 
+  test('隐藏消息会落到summary memory diary并驱动朋友圈', () {
+    final controller = ChatAppController.seeded();
+    final beforeMemories = controller.memories.length;
+    final beforeDiaries = controller.diaries.length;
+    final beforeThoughts = controller.thoughts.length;
+    final beforeSystems = controller.systemEntries.length;
+    final beforeMoments = controller.moments.length;
+
+    controller.ingestStructuredPayloads(
+      contactId: 'ari',
+      payloads: [
+        {'type': 'summary', 'content': '阿梨更新了一段新的陪伴总结。'},
+        {'type': 'memory', 'title': '新的长期记忆', 'content': '她希望被先安静抱一下。'},
+        {
+          'type': 'diary',
+          'title': '今晚的记录',
+          'content': '她愿意把疲惫讲给我听。',
+          'mood': '珍惜',
+        },
+        {'type': 'thought', 'content': '她今天真的很累。'},
+        {'type': 'system', 'content': '已同步一条新的总结。', 'level': 'info'},
+        {'type': 'moment', 'content': '晚风把今天的疲惫吹松了一点。', 'mood': '夜晚碎片'},
+      ],
+    );
+
+    final latestMoment = controller.moments.first;
+    controller.ingestStructuredPayloads(
+      contactId: 'yuejian',
+      payloads: [
+        {'type': 'moment_like', 'momentId': latestMoment.id},
+        {
+          'type': 'moment_comment',
+          'momentId': latestMoment.id,
+          'content': '这条动态的气氛很温柔。',
+        },
+      ],
+    );
+
+    expect(controller.summaryFor('ari')?.content, contains('陪伴总结'));
+    expect(controller.memories.length, beforeMemories + 1);
+    expect(controller.diaries.length, beforeDiaries + 1);
+    expect(controller.thoughts.length, beforeThoughts + 1);
+    expect(controller.systemEntries.length, beforeSystems + 1);
+    expect(controller.moments.length, beforeMoments + 1);
+    expect(controller.moments.first.likedByContactIds, contains('yuejian'));
+    expect(controller.moments.first.comments.last.content, contains('气氛很温柔'));
+  });
+
   testWidgets('桌面展示天气小组件与应用图标', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
     await tester.pump();
@@ -152,7 +200,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('天气'));
+    await tester.tap(find.byKey(const Key('home_dock_weather')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('weather_detail_scroll')), findsOneWidget);
@@ -192,7 +240,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('微信'));
+    await tester.tap(find.byKey(const Key('home_app_chat')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('chat_app_page')), findsOneWidget);
@@ -203,12 +251,31 @@ void main() {
     expect(find.text('阿梨'), findsOneWidget);
   });
 
+  testWidgets('首页可打开记忆与日记应用', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home_app_memory')));
+    await tester.pumpAndSettle();
+    expect(find.text('记忆'), findsWidgets);
+    expect(find.text('动态总结'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.arrow_back_ios_new_rounded).first);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home_app_diary')));
+    await tester.pumpAndSettle();
+    expect(find.text('日记'), findsWidgets);
+    expect(find.textContaining('想把她今天的疲惫接住'), findsOneWidget);
+  });
+
   testWidgets('聊天应用支持发送文字并收到角色回复', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
     await tester.pump();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('微信'));
+    await tester.tap(find.byKey(const Key('home_app_chat')));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('chat_thread_ari')));
@@ -234,7 +301,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('微信'));
+    await tester.tap(find.byKey(const Key('home_app_chat')));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('chat_thread_ari')));
@@ -253,7 +320,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('微信'));
+    await tester.tap(find.byKey(const Key('home_app_chat')));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('联系人').last);
@@ -291,7 +358,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('微信'));
+    await tester.tap(find.byKey(const Key('home_app_chat')));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('朋友圈').last);
@@ -323,7 +390,7 @@ void main() {
 
     expect(find.text('25°C'), findsOneWidget);
 
-    await tester.tap(find.text('天气'));
+    await tester.tap(find.byKey(const Key('home_dock_weather')));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('temperature_unit_button')));

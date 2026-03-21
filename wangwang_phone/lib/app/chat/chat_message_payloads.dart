@@ -1,4 +1,19 @@
-enum ChatMessageKind { word, action, emoji, image, redPacket, transfer }
+enum ChatMessageKind {
+  word,
+  action,
+  emoji,
+  image,
+  redPacket,
+  transfer,
+  thought,
+  summary,
+  memory,
+  diary,
+  system,
+  moment,
+  momentComment,
+  momentLike,
+}
 
 enum TransactionCardStatus { pending, accepted, rejected }
 
@@ -147,6 +162,115 @@ class TransferMessageBody extends MoneyCardMessageBody {
   }
 }
 
+class ThoughtMessageBody extends ChatMessageBody {
+  const ThoughtMessageBody(this.content);
+
+  final String content;
+
+  @override
+  ChatMessageKind get kind => ChatMessageKind.thought;
+
+  @override
+  String get previewText => '[想法] $content';
+}
+
+class SummaryMessageBody extends ChatMessageBody {
+  const SummaryMessageBody(this.content);
+
+  final String content;
+
+  @override
+  ChatMessageKind get kind => ChatMessageKind.summary;
+
+  @override
+  String get previewText => '[总结] $content';
+}
+
+class MemoryMessageBody extends ChatMessageBody {
+  const MemoryMessageBody({required this.title, required this.content});
+
+  final String title;
+  final String content;
+
+  @override
+  ChatMessageKind get kind => ChatMessageKind.memory;
+
+  @override
+  String get previewText => '[记忆] $title';
+}
+
+class DiaryMessageBody extends ChatMessageBody {
+  const DiaryMessageBody({
+    required this.title,
+    required this.content,
+    required this.moodLabel,
+  });
+
+  final String title;
+  final String content;
+  final String moodLabel;
+
+  @override
+  ChatMessageKind get kind => ChatMessageKind.diary;
+
+  @override
+  String get previewText => '[日记] $title';
+}
+
+class SystemMessageBody extends ChatMessageBody {
+  const SystemMessageBody({required this.content, this.level = 'info'});
+
+  final String content;
+  final String level;
+
+  @override
+  ChatMessageKind get kind => ChatMessageKind.system;
+
+  @override
+  String get previewText => '[系统] $content';
+}
+
+class MomentMessageBody extends ChatMessageBody {
+  const MomentMessageBody({required this.content, required this.moodLabel});
+
+  final String content;
+  final String moodLabel;
+
+  @override
+  ChatMessageKind get kind => ChatMessageKind.moment;
+
+  @override
+  String get previewText => '[朋友圈] $content';
+}
+
+class MomentCommentMessageBody extends ChatMessageBody {
+  const MomentCommentMessageBody({
+    required this.targetMomentId,
+    required this.content,
+  });
+
+  final String targetMomentId;
+  final String content;
+
+  @override
+  ChatMessageKind get kind => ChatMessageKind.momentComment;
+
+  @override
+  String get previewText => '[评论朋友圈] $content';
+}
+
+class MomentLikeMessageBody extends ChatMessageBody {
+  const MomentLikeMessageBody({required this.targetMomentId});
+
+  final String targetMomentId;
+
+  @override
+  ChatMessageKind get kind => ChatMessageKind.momentLike;
+
+  @override
+  String get previewText => '[点赞朋友圈] $targetMomentId';
+}
+
 /// 统一按 `type` 字段分发消息内容，后续可直接承接 LLM/C++ 解码后的结构化结果。
 class ChatStructuredMessageParser {
   const ChatStructuredMessageParser._();
@@ -199,6 +323,63 @@ class ChatStructuredMessageParser {
           'amountLabel',
         ], fallback: '18.80'),
         status: _readStatus(payload['status']),
+      ),
+      'thought' => ThoughtMessageBody(
+        _readText(payload, const ['text', 'content'], fallback: '产生了一段新的思考'),
+      ),
+      'summary' => SummaryMessageBody(
+        _readText(payload, const ['text', 'content'], fallback: '生成了一段新的总结'),
+      ),
+      'memory' => MemoryMessageBody(
+        title: _readText(payload, const ['title'], fallback: '新的长期记忆'),
+        content: _readText(payload, const [
+          'content',
+          'text',
+        ], fallback: '记录了一条新的长期记忆'),
+      ),
+      'diary' => DiaryMessageBody(
+        title: _readText(payload, const ['title'], fallback: '今日小记'),
+        content: _readText(payload, const [
+          'content',
+          'text',
+        ], fallback: '写下了一段今天的日记'),
+        moodLabel: _readText(payload, const [
+          'mood',
+          'moodLabel',
+        ], fallback: '心情记录'),
+      ),
+      'system' => SystemMessageBody(
+        content: _readText(payload, const [
+          'content',
+          'text',
+        ], fallback: '系统生成了一条记录'),
+        level: _readText(payload, const ['level'], fallback: 'info'),
+      ),
+      'moment' => MomentMessageBody(
+        content: _readText(payload, const [
+          'content',
+          'text',
+        ], fallback: '发布了一条新的朋友圈'),
+        moodLabel: _readText(payload, const [
+          'mood',
+          'moodLabel',
+        ], fallback: '今日分享'),
+      ),
+      'moment_comment' => MomentCommentMessageBody(
+        targetMomentId: _readText(payload, const [
+          'momentId',
+          'targetMomentId',
+        ], fallback: ''),
+        content: _readText(payload, const [
+          'content',
+          'text',
+        ], fallback: '留下一条新的评论'),
+      ),
+      'moment_like' => MomentLikeMessageBody(
+        targetMomentId: _readText(payload, const [
+          'momentId',
+          'targetMomentId',
+        ], fallback: ''),
       ),
       _ => WordMessageBody(
         _readText(payload, const ['text', 'content'], fallback: '收到一条暂未识别的消息'),

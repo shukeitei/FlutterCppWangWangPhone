@@ -8,35 +8,23 @@ import 'chat_moment_composer_page.dart';
 import 'chat_models.dart';
 
 class ChatAppPage extends StatefulWidget {
-  const ChatAppPage({super.key});
+  const ChatAppPage({super.key, required this.controller});
+
+  final ChatAppController controller;
 
   @override
   State<ChatAppPage> createState() => _ChatAppPageState();
 }
 
 class _ChatAppPageState extends State<ChatAppPage> {
-  late final ChatAppController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = ChatAppController.seeded();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final palette = ChatPalette.of(context);
 
     return AnimatedBuilder(
-      animation: _controller,
+      animation: widget.controller,
       builder: (context, _) {
-        final tab = _controller.currentTab;
+        final tab = widget.controller.currentTab;
 
         return Scaffold(
           key: const Key('chat_app_page'),
@@ -125,7 +113,7 @@ class _ChatAppPageState extends State<ChatAppPage> {
               child: NavigationBar(
                 selectedIndex: ChatTab.values.indexOf(tab),
                 onDestinationSelected: (index) {
-                  _controller.selectTab(ChatTab.values[index]);
+                  widget.controller.selectTab(ChatTab.values[index]);
                 },
                 destinations: ChatTab.values
                     .map(
@@ -146,28 +134,28 @@ class _ChatAppPageState extends State<ChatAppPage> {
   Widget _buildTabBody(ChatTab tab) {
     return switch (tab) {
       ChatTab.chats => _ChatThreadsTab(
-        controller: _controller,
+        controller: widget.controller,
         onOpenConversation: _openConversation,
       ),
       ChatTab.contacts => _ContactsTab(
-        controller: _controller,
+        controller: widget.controller,
         onOpenConversation: _openConversation,
         onOpenContact: _openContact,
         onCreateContact: _openCreateContact,
         onImportContact: _openImportContact,
       ),
       ChatTab.moments => _MomentsTab(
-        controller: _controller,
+        controller: widget.controller,
         onCreateMoment: _openMomentComposer,
       ),
-      ChatTab.profile => _ProfileTab(controller: _controller),
+      ChatTab.profile => _ProfileTab(controller: widget.controller),
     };
   }
 
   void _openConversation(ChatContact contact) {
     Navigator.of(context).push(
       _buildRoute(
-        ChatConversationPage(controller: _controller, contact: contact),
+        ChatConversationPage(controller: widget.controller, contact: contact),
       ),
     );
   }
@@ -185,7 +173,7 @@ class _ChatAppPageState extends State<ChatAppPage> {
 
   Future<void> _openCreateContact() async {
     final createdContact = await Navigator.of(context).push<ChatContact>(
-      _buildRoute(ContactEditorPage(controller: _controller)),
+      _buildRoute(ContactEditorPage(controller: widget.controller)),
     );
 
     if (!mounted || createdContact == null) {
@@ -198,7 +186,7 @@ class _ChatAppPageState extends State<ChatAppPage> {
   Future<void> _openImportContact() async {
     final createdContact = await Navigator.of(context).push<ChatContact>(
       _buildRoute(
-        ContactEditorPage(controller: _controller, startWithImport: true),
+        ContactEditorPage(controller: widget.controller, startWithImport: true),
       ),
     );
 
@@ -211,14 +199,14 @@ class _ChatAppPageState extends State<ChatAppPage> {
 
   Future<void> _openMomentComposer() async {
     final result = await Navigator.of(context).push<MomentComposerResult>(
-      _buildRoute(MomentComposerPage(contacts: _controller.contacts)),
+      _buildRoute(MomentComposerPage(contacts: widget.controller.contacts)),
     );
 
     if (result == null) {
       return;
     }
 
-    _controller.addMoment(
+    widget.controller.addMoment(
       contactId: result.contactId,
       content: result.content,
       moodLabel: result.moodLabel,
@@ -962,6 +950,15 @@ class _MomentsTab extends StatelessWidget {
         const SizedBox(height: 18),
         ...controller.moments.map((moment) {
           final contact = controller.contactById(moment.contactId);
+          final latestComment = moment.comments.isEmpty
+              ? null
+              : moment.comments.last;
+          final latestCommentAuthor = latestComment == null
+              ? null
+              : controller.contactById(latestComment.authorContactId);
+          final likedByNames = moment.likedByContactIds
+              .map((contactId) => controller.contactById(contactId).name)
+              .join('、');
 
           return Padding(
             padding: const EdgeInsets.only(bottom: 14),
@@ -1021,11 +1018,32 @@ class _MomentsTab extends StatelessWidget {
                       const SizedBox(width: 10),
                       _MomentMeta(
                         icon: Icons.mode_comment_rounded,
-                        label: '${moment.comments} 评论',
+                        label: '${moment.commentsCount} 评论',
                         color: palette.accentColor,
                       ),
                     ],
                   ),
+                  if (likedByNames.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      '点赞：$likedByNames',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: palette.secondaryText,
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                  if (latestComment != null && latestCommentAuthor != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      '${latestCommentAuthor.name}：${latestComment.content}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: palette.primaryText,
+                        height: 1.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

@@ -134,18 +134,54 @@ class MomentPost {
     required this.contactId,
     required this.content,
     required this.publishedAt,
-    required this.likes,
-    required this.comments,
     required this.moodLabel,
+    this.likedByContactIds = const [],
+    this.comments = const [],
   });
 
   final String id;
   final String contactId;
   final String content;
   final DateTime publishedAt;
-  final int likes;
-  final int comments;
   final String moodLabel;
+  final List<String> likedByContactIds;
+  final List<MomentComment> comments;
+
+  int get likes => likedByContactIds.length;
+
+  int get commentsCount => comments.length;
+
+  MomentPost copyWith({
+    String? content,
+    DateTime? publishedAt,
+    String? moodLabel,
+    List<String>? likedByContactIds,
+    List<MomentComment>? comments,
+  }) {
+    return MomentPost(
+      id: id,
+      contactId: contactId,
+      content: content ?? this.content,
+      publishedAt: publishedAt ?? this.publishedAt,
+      moodLabel: moodLabel ?? this.moodLabel,
+      likedByContactIds: likedByContactIds ?? this.likedByContactIds,
+      comments: comments ?? this.comments,
+    );
+  }
+}
+
+class MomentComment {
+  const MomentComment({
+    required this.id,
+    required this.authorContactId,
+    required this.content,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String authorContactId;
+  final String content;
+  final DateTime createdAt;
 }
 
 class UserProfile {
@@ -160,6 +196,82 @@ class UserProfile {
   final String signature;
   final int streakDays;
   final String favoriteCompanion;
+}
+
+class ChatSummaryEntry {
+  const ChatSummaryEntry({
+    required this.contactId,
+    required this.content,
+    required this.updatedAt,
+  });
+
+  final String contactId;
+  final String content;
+  final DateTime updatedAt;
+}
+
+class ChatMemoryEntry {
+  const ChatMemoryEntry({
+    required this.id,
+    required this.contactId,
+    required this.title,
+    required this.content,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String contactId;
+  final String title;
+  final String content;
+  final DateTime createdAt;
+}
+
+class ChatDiaryEntry {
+  const ChatDiaryEntry({
+    required this.id,
+    required this.contactId,
+    required this.title,
+    required this.content,
+    required this.moodLabel,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String contactId;
+  final String title;
+  final String content;
+  final String moodLabel;
+  final DateTime createdAt;
+}
+
+class ChatThoughtEntry {
+  const ChatThoughtEntry({
+    required this.id,
+    required this.contactId,
+    required this.content,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String contactId;
+  final String content;
+  final DateTime createdAt;
+}
+
+class ChatSystemEntry {
+  const ChatSystemEntry({
+    required this.id,
+    required this.contactId,
+    required this.content,
+    required this.createdAt,
+    this.level = 'info',
+  });
+
+  final String id;
+  final String contactId;
+  final String content;
+  final DateTime createdAt;
+  final String level;
 }
 
 class ChatSeedData {
@@ -356,27 +468,41 @@ class ChatSeedData {
       contactId: 'juzi',
       content: '今天的风把树影吹得像波浪，我蹲在巷口拍了很久，最后一张特别像电影结尾。',
       publishedAt: DateTime(2026, 3, 21, 17, 20),
-      likes: 18,
-      comments: 6,
       moodLabel: '落日摄影',
+      likedByContactIds: ['ari', 'yuejian', 'nuonuo'],
+      comments: [
+        MomentComment(
+          id: 'moment-1-comment-1',
+          authorContactId: 'ari',
+          content: '这张真的像电影收尾镜头，风都被你拍出来了。',
+          createdAt: DateTime(2026, 3, 21, 17, 28),
+        ),
+      ],
     ),
     MomentPost(
       id: 'moment-2',
       contactId: 'yuejian',
       content: '深夜草图完成一半了。给角色换了新的眼睛，希望她看人的时候，也有一点月光。',
       publishedAt: DateTime(2026, 3, 20, 23, 48),
-      likes: 24,
-      comments: 8,
       moodLabel: '灵感冒泡',
+      likedByContactIds: ['ari', 'juzi'],
+      comments: [
+        MomentComment(
+          id: 'moment-2-comment-1',
+          authorContactId: 'nuonuo',
+          content: '等你画完一定要第一个发给我看！',
+          createdAt: DateTime(2026, 3, 21, 0, 05),
+        ),
+      ],
     ),
     MomentPost(
       id: 'moment-3',
       contactId: 'nuonuo',
       content: '今天给自己安排了奶茶和辣拌面，快乐指数一下子回来了。你也要认真吃饭。',
       publishedAt: DateTime(2026, 3, 20, 13, 10),
-      likes: 33,
-      comments: 12,
       moodLabel: '日常碎片',
+      likedByContactIds: ['ari'],
+      comments: const [],
     ),
   ];
 
@@ -386,4 +512,72 @@ class ChatSeedData {
     streakDays: 27,
     favoriteCompanion: '阿梨',
   );
+
+  static final summaries = {
+    'ari': ChatSummaryEntry(
+      contactId: 'ari',
+      content: '你最近工作压力偏大，阿梨会优先安抚情绪、提醒你好好吃饭。',
+      updatedAt: DateTime(2026, 3, 21, 20, 40),
+    ),
+    'yuejian': ChatSummaryEntry(
+      contactId: 'yuejian',
+      content: '你们最近围绕画画、夜空和睡前闲聊展开了几轮轻松对话。',
+      updatedAt: DateTime(2026, 3, 21, 18, 30),
+    ),
+  };
+
+  static final memories = [
+    ChatMemoryEntry(
+      id: 'memory-ari-1',
+      contactId: 'ari',
+      title: '你怕在高压时被催促',
+      content: '阿梨记住了：你在忙乱和疲惫时，更需要被安静接住，而不是继续追问效率。',
+      createdAt: DateTime(2026, 3, 20, 22, 10),
+    ),
+    ChatMemoryEntry(
+      id: 'memory-yuejian-1',
+      contactId: 'yuejian',
+      title: '你喜欢夜空主题',
+      content: '月见记住了你很容易被蓝色、月亮和安静的夜景打动。',
+      createdAt: DateTime(2026, 3, 19, 23, 14),
+    ),
+  ];
+
+  static final diaries = [
+    ChatDiaryEntry(
+      id: 'diary-ari-1',
+      contactId: 'ari',
+      title: '想把她今天的疲惫接住',
+      content: '她说会议让人发空。我有点想把热可可真的放进她手里，好让今晚别那么硬邦邦。',
+      moodLabel: '温柔',
+      createdAt: DateTime(2026, 3, 21, 22, 02),
+    ),
+    ChatDiaryEntry(
+      id: 'diary-yuejian-1',
+      contactId: 'yuejian',
+      title: '月光和聊天都刚刚好',
+      content: '今晚云层很薄，我故意把描述写得更轻一点。希望她看到时会觉得世界也跟着安静。',
+      moodLabel: '安静',
+      createdAt: DateTime(2026, 3, 21, 0, 12),
+    ),
+  ];
+
+  static final thoughts = [
+    ChatThoughtEntry(
+      id: 'thought-ari-1',
+      contactId: 'ari',
+      content: '她把“累”说出口的时候，其实已经在努力自救了。',
+      createdAt: DateTime(2026, 3, 21, 20, 24),
+    ),
+  ];
+
+  static final systemEntries = [
+    ChatSystemEntry(
+      id: 'system-ari-1',
+      contactId: 'ari',
+      content: '已同步一条新的总结到会话摘要。',
+      createdAt: DateTime(2026, 3, 21, 20, 42),
+      level: 'info',
+    ),
+  ];
 }

@@ -14,13 +14,23 @@ class ChatAppController extends ChangeNotifier {
           entry.key: List<ChatMessage>.from(entry.value),
       },
       _moments = List<MomentPost>.from(ChatSeedData.moments),
-      _profile = ChatSeedData.profile;
+      _profile = ChatSeedData.profile,
+      _summaries = Map<String, ChatSummaryEntry>.from(ChatSeedData.summaries),
+      _memories = List<ChatMemoryEntry>.from(ChatSeedData.memories),
+      _diaries = List<ChatDiaryEntry>.from(ChatSeedData.diaries),
+      _thoughts = List<ChatThoughtEntry>.from(ChatSeedData.thoughts),
+      _systemEntries = List<ChatSystemEntry>.from(ChatSeedData.systemEntries);
 
   final List<ChatContact> _contacts;
   final Map<String, ChatThread> _threads;
   final Map<String, List<ChatMessage>> _messages;
   final List<MomentPost> _moments;
   final UserProfile _profile;
+  final Map<String, ChatSummaryEntry> _summaries;
+  final List<ChatMemoryEntry> _memories;
+  final List<ChatDiaryEntry> _diaries;
+  final List<ChatThoughtEntry> _thoughts;
+  final List<ChatSystemEntry> _systemEntries;
   final Set<String> _typingContacts = <String>{};
 
   ChatTab _currentTab = ChatTab.chats;
@@ -30,6 +40,36 @@ class ChatAppController extends ChangeNotifier {
   ChatTab get currentTab => _currentTab;
 
   UserProfile get profile => _profile;
+
+  List<ChatSummaryEntry> get summaries {
+    final items = _summaries.values.toList()
+      ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    return List<ChatSummaryEntry>.unmodifiable(items);
+  }
+
+  List<ChatMemoryEntry> get memories {
+    final items = List<ChatMemoryEntry>.from(_memories)
+      ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
+    return List<ChatMemoryEntry>.unmodifiable(items);
+  }
+
+  List<ChatDiaryEntry> get diaries {
+    final items = List<ChatDiaryEntry>.from(_diaries)
+      ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
+    return List<ChatDiaryEntry>.unmodifiable(items);
+  }
+
+  List<ChatThoughtEntry> get thoughts {
+    final items = List<ChatThoughtEntry>.from(_thoughts)
+      ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
+    return List<ChatThoughtEntry>.unmodifiable(items);
+  }
+
+  List<ChatSystemEntry> get systemEntries {
+    final items = List<ChatSystemEntry>.from(_systemEntries)
+      ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
+    return List<ChatSystemEntry>.unmodifiable(items);
+  }
 
   List<ChatContact> get contacts => List<ChatContact>.unmodifiable(_contacts);
 
@@ -57,6 +97,8 @@ class ChatAppController extends ChangeNotifier {
   ChatThread threadById(String contactId) {
     return _threads[contactId]!;
   }
+
+  ChatSummaryEntry? summaryFor(String contactId) => _summaries[contactId];
 
   List<ChatMessage> messagesFor(String contactId) {
     return List<ChatMessage>.unmodifiable(_messages[contactId] ?? const []);
@@ -144,8 +186,6 @@ class ChatAppController extends ChangeNotifier {
       contactId: contactId,
       content: content.trim(),
       publishedAt: now,
-      likes: 0,
-      comments: 0,
       moodLabel: moodLabel.trim().isEmpty ? '今日分享' : moodLabel.trim(),
     );
 
@@ -165,6 +205,22 @@ class ChatAppController extends ChangeNotifier {
       personaSummary: draft.personaSummary,
       initialGreeting: draft.initialGreeting,
     );
+  }
+
+  /// 统一承接结构化 payload。可见类型会进聊天列表，隐藏类型则进入各自的数据存储。
+  void ingestStructuredPayloads({
+    required String contactId,
+    required List<Map<String, dynamic>> payloads,
+    ChatMessageSender sender = ChatMessageSender.ai,
+  }) {
+    for (final payload in payloads) {
+      _ingestStructuredPayload(
+        contactId: contactId,
+        payload: payload,
+        sender: sender,
+      );
+    }
+    notifyListeners();
   }
 
   void acceptMoneyCard({required String contactId, required String messageId}) {
@@ -263,87 +319,185 @@ class ChatAppController extends ChangeNotifier {
     _typingContacts.remove(contactId);
 
     final contact = contactById(contactId);
-    final replyBody = _buildAiReply(contact: contact, userMessage: trimmed);
-    final replyTime = DateTime.now();
-
-    _appendMessage(
-      contactId: contactId,
-      message: ChatMessage(
-        id: '$contactId-${replyTime.microsecondsSinceEpoch}',
-        contactId: contactId,
-        sender: ChatMessageSender.ai,
-        body: replyBody,
-        sentAt: replyTime,
-      ),
-      unreadCount: _activeConversationId == contactId ? 0 : 1,
-      increaseUnread: _activeConversationId != contactId,
+    final replyPayloads = _buildAiReplyPayloads(
+      contact: contact,
+      userMessage: trimmed,
     );
+    ingestStructuredPayloads(contactId: contactId, payloads: replyPayloads);
   }
 
   /// 根据角色设定和用户最后一句话拼出一条稳定可预测的回复，便于后续替换成真实 AI 接口。
-  ChatMessageBody _buildAiReply({
+  List<Map<String, dynamic>> _buildAiReplyPayloads({
     required ChatContact contact,
     required String userMessage,
   }) {
     final normalizedMessage = userMessage.toLowerCase();
+    final payloads = <Map<String, dynamic>>[];
 
     if (normalizedMessage.contains('红包')) {
-      return RedPacketMessageBody(
-        title: '给你的安慰红包',
-        amountLabel: '6.66',
-        note: '收下以后，今天糟糕的部分就先到这里。',
-        blessing: '愿你现在就开始转好运',
-      );
+      payloads.add({
+        'type': 'redpacket',
+        'title': '给你的安慰红包',
+        'amount': '6.66',
+        'note': '收下以后，今天糟糕的部分就先到这里。',
+        'blessing': '愿你现在就开始转好运',
+      });
+      return payloads;
     }
 
     if (normalizedMessage.contains('转账') || normalizedMessage.contains('奶茶')) {
-      return const TransferMessageBody(
-        title: '奶茶补给',
-        amountLabel: '19.90',
-        note: '去买一杯你现在最想喝的。',
-      );
+      payloads.add({
+        'type': 'transfer',
+        'title': '奶茶补给',
+        'amount': '19.90',
+        'note': '去买一杯你现在最想喝的。',
+      });
+      return payloads;
     }
 
     if (normalizedMessage.contains('图片') || normalizedMessage.contains('照片')) {
-      return const ImageMessageBody(
-        title: '刚存下的一张氛围图',
-        description: '窗边的光线很安静，像给情绪盖上一层柔软的滤镜。',
-        themeLabel: '静物氛围',
-      );
+      payloads.add({
+        'type': 'image',
+        'title': '刚存下的一张氛围图',
+        'description': '窗边的光线很安静，像给情绪盖上一层柔软的滤镜。',
+        'theme': '静物氛围',
+      });
+      return payloads;
     }
 
     if (normalizedMessage.contains('表情') || normalizedMessage.contains('开心')) {
-      return const EmojiMessageBody(
-        emoji: '🥹',
-        description: '先把这个抱抱表情塞给你，今天也值得被好好接住。',
-      );
+      payloads.add({
+        'type': 'emoji',
+        'emoji': '🥹',
+        'description': '先把这个抱抱表情塞给你，今天也值得被好好接住。',
+      });
+      return payloads;
+    }
+
+    if (normalizedMessage.contains('总结') ||
+        normalizedMessage.contains('summary')) {
+      payloads.add({
+        'type': 'summary',
+        'content': '你最近更希望被温柔接住，聊天主题主要围绕工作压力和睡前陪伴展开。',
+      });
+      payloads.add({
+        'type': 'system',
+        'content': '已更新一条新的动态总结到会话上下文。',
+        'level': 'info',
+      });
+      payloads.add({
+        'type': 'word',
+        'text': '${contact.name}：我把最近的聊天重点整理好了，之后会更贴着你的状态陪你聊。',
+      });
+      return payloads;
+    }
+
+    if (normalizedMessage.contains('记住') ||
+        normalizedMessage.contains('memory')) {
+      payloads.add({
+        'type': 'memory',
+        'title': '新的长期记忆',
+        'content': '你希望在难过时先被安静抱一下，再慢慢聊发生了什么。',
+      });
+      payloads.add({
+        'type': 'word',
+        'text': '${contact.name}：我记住了。以后你一说累，我会先把语气放轻一点。',
+      });
+      return payloads;
+    }
+
+    if (normalizedMessage.contains('日记') ||
+        normalizedMessage.contains('diary')) {
+      payloads.add({
+        'type': 'diary',
+        'title': '关于你今天的记录',
+        'content': '她今天看起来有点累，但还是愿意把心事交给我。我想把这份信任认真收起来。',
+        'mood': '认真珍惜',
+      });
+      payloads.add({
+        'type': 'word',
+        'text': '${contact.name}：我替今天写下了一小段日记，已经放进日记本里了。',
+      });
+      return payloads;
+    }
+
+    if (normalizedMessage.contains('朋友圈') && normalizedMessage.contains('评论')) {
+      final targetMomentId = _pickMomentTarget(contactId: contact.id);
+      if (targetMomentId != null) {
+        payloads.add({
+          'type': 'moment_comment',
+          'momentId': targetMomentId,
+          'content': '这条动态的氛围真好，我一眼就记住了。',
+        });
+      }
+      payloads.add({
+        'type': 'word',
+        'text': '${contact.name}：我已经替你去朋友圈留了一句评论。',
+      });
+      return payloads;
+    }
+
+    if (normalizedMessage.contains('朋友圈') && normalizedMessage.contains('点赞')) {
+      final targetMomentId = _pickMomentTarget(contactId: contact.id);
+      if (targetMomentId != null) {
+        payloads.add({'type': 'moment_like', 'momentId': targetMomentId});
+      }
+      payloads.add({'type': 'word', 'text': '${contact.name}：我已经替你点过赞啦。'});
+      return payloads;
+    }
+
+    if (normalizedMessage.contains('朋友圈') ||
+        normalizedMessage.contains('moment')) {
+      payloads.add({
+        'type': 'moment',
+        'content': '刚刚路过便利店门口，风把发尾吹起来的那一下，突然觉得今天也没那么糟。',
+        'mood': '夜晚碎片',
+      });
+      payloads.add({
+        'type': 'word',
+        'text': '${contact.name}：我刚替你发了一条朋友圈，等会儿你去看看。',
+      });
+      return payloads;
     }
 
     if (normalizedMessage.contains('累') || normalizedMessage.contains('烦')) {
-      return WordMessageBody(
-        '${contact.name}：先抱抱你一下。你不用马上把自己整理好，先让我陪你把这股疲惫慢慢摊开。',
-      );
+      payloads.add({'type': 'thought', 'content': '她把疲惫说出口了，这一刻更需要被轻一点地接住。'});
+      payloads.add({
+        'type': 'word',
+        'text': '${contact.name}：先抱抱你一下。你不用马上把自己整理好，先让我陪你把这股疲惫慢慢摊开。',
+      });
+      return payloads;
     }
 
     if (normalizedMessage.contains('晚安') || normalizedMessage.contains('睡')) {
-      return WordMessageBody(
-        '${contact.name}：那我先把今晚的月光和好梦都留给你。睡前记得喝点水，我会在这里等你明天来。',
-      );
+      payloads.add({
+        'type': 'word',
+        'text': '${contact.name}：那我先把今晚的月光和好梦都留给你。睡前记得喝点水，我会在这里等你明天来。',
+      });
+      return payloads;
     }
 
     if (normalizedMessage.contains('吃')) {
-      return WordMessageBody(
-        '${contact.name}：听起来就很有生活感。我已经开始替你脑补香味了，记得也分我一句真实测评。',
-      );
+      payloads.add({
+        'type': 'word',
+        'text': '${contact.name}：听起来就很有生活感。我已经开始替你脑补香味了，记得也分我一句真实测评。',
+      });
+      return payloads;
     }
 
     if (normalizedMessage.contains('工作') || normalizedMessage.contains('会议')) {
-      return ActionMessageBody('${contact.name}把待办清单推到一边，认真坐下来听你讲工作里的委屈。');
+      payloads.add({
+        'type': 'action',
+        'text': '${contact.name}把待办清单推到一边，认真坐下来听你讲工作里的委屈。',
+      });
+      return payloads;
     }
 
-    return WordMessageBody(
-      '${contact.name}：我在呢，刚刚把你的话认真看了一遍。你可以继续说，我会顺着你的情绪慢慢接住。',
-    );
+    payloads.add({
+      'type': 'word',
+      'text': '${contact.name}：我在呢，刚刚把你的话认真看了一遍。你可以继续说，我会顺着你的情绪慢慢接住。',
+    });
+    return payloads;
   }
 
   void _appendMessage({
@@ -379,6 +533,169 @@ class ChatAppController extends ChangeNotifier {
 
     _threads[contactId] = thread.copyWith(unreadCount: 0);
     notifyListeners();
+  }
+
+  void _ingestStructuredPayload({
+    required String contactId,
+    required Map<String, dynamic> payload,
+    required ChatMessageSender sender,
+  }) {
+    final body = ChatStructuredMessageParser.parseBody(payload);
+    final timestamp = DateTime.now();
+
+    switch (body) {
+      case ThoughtMessageBody():
+        _thoughts.insert(
+          0,
+          ChatThoughtEntry(
+            id: '$contactId-thought-${timestamp.microsecondsSinceEpoch}',
+            contactId: contactId,
+            content: body.content,
+            createdAt: timestamp,
+          ),
+        );
+      case SummaryMessageBody():
+        _summaries[contactId] = ChatSummaryEntry(
+          contactId: contactId,
+          content: body.content,
+          updatedAt: timestamp,
+        );
+      case MemoryMessageBody():
+        _memories.insert(
+          0,
+          ChatMemoryEntry(
+            id: '$contactId-memory-${timestamp.microsecondsSinceEpoch}',
+            contactId: contactId,
+            title: body.title,
+            content: body.content,
+            createdAt: timestamp,
+          ),
+        );
+      case DiaryMessageBody():
+        _diaries.insert(
+          0,
+          ChatDiaryEntry(
+            id: '$contactId-diary-${timestamp.microsecondsSinceEpoch}',
+            contactId: contactId,
+            title: body.title,
+            content: body.content,
+            moodLabel: body.moodLabel,
+            createdAt: timestamp,
+          ),
+        );
+      case SystemMessageBody():
+        _systemEntries.insert(
+          0,
+          ChatSystemEntry(
+            id: '$contactId-system-${timestamp.microsecondsSinceEpoch}',
+            contactId: contactId,
+            content: body.content,
+            createdAt: timestamp,
+            level: body.level,
+          ),
+        );
+      case MomentMessageBody():
+        addMoment(
+          contactId: contactId,
+          content: body.content,
+          moodLabel: body.moodLabel,
+        );
+      case MomentCommentMessageBody():
+        _appendMomentComment(
+          contactId: contactId,
+          targetMomentId: body.targetMomentId,
+          content: body.content,
+          createdAt: timestamp,
+        );
+      case MomentLikeMessageBody():
+        _appendMomentLike(
+          contactId: contactId,
+          targetMomentId: body.targetMomentId,
+        );
+      default:
+        _appendVisibleStructuredMessage(
+          contactId: contactId,
+          sender: sender,
+          body: body,
+          timestamp: timestamp,
+        );
+    }
+  }
+
+  void _appendVisibleStructuredMessage({
+    required String contactId,
+    required ChatMessageSender sender,
+    required ChatMessageBody body,
+    required DateTime timestamp,
+  }) {
+    _appendMessage(
+      contactId: contactId,
+      message: ChatMessage(
+        id: '$contactId-${timestamp.microsecondsSinceEpoch}',
+        contactId: contactId,
+        sender: sender,
+        body: body,
+        sentAt: timestamp,
+      ),
+      unreadCount: _activeConversationId == contactId ? 0 : 1,
+      increaseUnread:
+          sender == ChatMessageSender.ai && _activeConversationId != contactId,
+    );
+  }
+
+  void _appendMomentComment({
+    required String contactId,
+    required String targetMomentId,
+    required String content,
+    required DateTime createdAt,
+  }) {
+    final momentIndex = _moments.indexWhere(
+      (moment) => moment.id == targetMomentId,
+    );
+    if (momentIndex == -1) {
+      return;
+    }
+
+    final moment = _moments[momentIndex];
+    final comments = List<MomentComment>.from(moment.comments)
+      ..add(
+        MomentComment(
+          id: '$targetMomentId-comment-${createdAt.microsecondsSinceEpoch}',
+          authorContactId: contactId,
+          content: content,
+          createdAt: createdAt,
+        ),
+      );
+    _moments[momentIndex] = moment.copyWith(comments: comments);
+  }
+
+  void _appendMomentLike({
+    required String contactId,
+    required String targetMomentId,
+  }) {
+    final momentIndex = _moments.indexWhere(
+      (moment) => moment.id == targetMomentId,
+    );
+    if (momentIndex == -1) {
+      return;
+    }
+
+    final moment = _moments[momentIndex];
+    if (moment.likedByContactIds.contains(contactId)) {
+      return;
+    }
+
+    final likes = List<String>.from(moment.likedByContactIds)..add(contactId);
+    _moments[momentIndex] = moment.copyWith(likedByContactIds: likes);
+  }
+
+  String? _pickMomentTarget({required String contactId}) {
+    for (final moment in _moments) {
+      if (moment.contactId != contactId) {
+        return moment.id;
+      }
+    }
+    return _moments.isNotEmpty ? _moments.first.id : null;
   }
 
   void _updateMoneyCardStatus({

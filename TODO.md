@@ -194,8 +194,8 @@
 - [x] 实现统一聊天消息模型，承接 C++ 解析结果并供 Flutter 渲染层使用
 - [x] 实现 `word`、`action`、`emoji`、`image`、`redpacket`、`transfer` 等可见消息气泡
 - [x] 实现 `accept*`、`reject*` 对红包/转账卡片的状态更新逻辑
-- [ ] 实现 `thought`、`summary`、`memory`、`diary`、`system` 等非直接展示消息的存储与控制逻辑
-- [ ] 实现 `moment`、`moment_comment`、`moment_like` 对朋友圈模块的数据驱动逻辑
+- [x] 实现 `thought`、`summary`、`memory`、`diary`、`system` 等非直接展示消息的存储与控制逻辑
+- [x] 实现 `moment`、`moment_comment`、`moment_like` 对朋友圈模块的数据驱动逻辑
 - [ ] 实现消息解析失败、未知类型、字段缺失时的容错与日志记录
 
 
