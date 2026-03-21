@@ -70,31 +70,31 @@
 - [x] 实现毛玻璃效果背景
 
 ### 2.1.1 天气小组件
-- [ ] 实现天气小组件UI布局
-- [ ] 实现天气图标显示（晴/阴/雨/雪等）
-- [ ] 实现温度显示
-- [ ] 实现城市名称显示
-- [ ] 实现天气数据加载逻辑
+- [x] 实现天气小组件UI布局
+- [x] 实现天气图标显示（晴/阴/雨/雪等）
+- [x] 实现温度显示
+- [x] 实现城市名称显示
+- [x] 实现天气数据加载逻辑
 - [ ] 实现天气API配置（支持7timer免费天气API）
-- [ ] 实现小组件刷新功能
+- [x] 实现小组件刷新功能
 - [ ] 实现小组件点击展开详情
 - [ ] 实现多个天气样式模板
 
 #### 2.1.1.1 7timer免费天气API集成
-- [ ] 实现API调用（http://www.7timer.info/bin/api.php）
-- [ ] 支持参数：lon（经度）、lat（纬度）、product（产品类型）、output（固定为json）
-- [ ] 使用civillight产品获取一周逐日预报
-- [ ] 解析天气类型字段（weather type）：clearday/clearnight/pcloudyday/pcloudynight/mcloudyday/mcloudynight/cloudyday/cloudynight/humidday/humidnight/lightrainday/lightrainnight/oshowerday/oshowernight/ishowerday/ishowernight/lightsnowday/lightsnownight/rainday/rainnight/snowday/snownight/rainsnowday/rainsnownight/tsday/tsnight/tsrainday/tsrainnight
-- [ ] 解析云量数据（cloudcover）：1-9对应0%-100%
-- [ ] 解析2米最高/最低气温（temp2m_max/temp2m_min）：-76至+60摄氏度
-- [ ] 解析2米相对湿度（rh2m）：-4至16对应0%-100%
-- [ ] 解析10米风向（wind10m.direction）：N/NE/E/SE/S/SW/W/NW
-- [ ] 解析10米风速（wind10m.speed）：1-8对应无风至12级
-- [ ] 解析降水类型（precipitation.type）：snow/rain/frzr/icep/none
-- [ ] 实现天气图标映射（根据天气类型显示对应图标）
+- [x] 实现API调用（http://www.7timer.info/bin/api.php）
+- [x] 支持参数：lon（经度）、lat（纬度）、product（产品类型）、output（固定为json）
+- [x] 使用civillight产品获取一周逐日预报
+- [x] 解析天气类型字段（weather type）：clearday/clearnight/pcloudyday/pcloudynight/mcloudyday/mcloudynight/cloudyday/cloudynight/humidday/humidnight/lightrainday/lightrainnight/oshowerday/oshowernight/ishowerday/ishowernight/lightsnowday/lightsnownight/rainday/rainnight/snowday/snownight/rainsnowday/rainsnownight/tsday/tsnight/tsrainday/tsrainnight
+- [x] 解析云量数据（cloudcover）：1-9对应0%-100%
+- [x] 解析2米最高/最低气温（temp2m_max/temp2m_min）：-76至+60摄氏度
+- [x] 解析2米相对湿度（rh2m）：-4至16对应0%-100%
+- [x] 解析10米风向（wind10m.direction）：N/NE/E/SE/S/SW/W/NW
+- [x] 解析10米风速（wind10m.speed）：1-8对应无风至12级
+- [x] 解析降水类型（precipitation.type）：snow/rain/frzr/icep/none
+- [x] 实现天气图标映射（根据天气类型显示对应图标）
 - [ ] 实现温度单位转换（摄氏度/华氏度）
 - [ ] 实现位置配置（支持手动输入经纬度或自动定位）
-- [ ] 实现API错误处理和无效值（-9999）处理
+- [x] 实现API错误处理和无效值（-9999）处理
 
 #### 2.1.1.3 用户定位功能
 - [ ] 实现GPS定位获取用户当前经纬度
@@ -190,6 +190,26 @@
 - [ ] 实现接收AI回复功能
 - [ ] 实现语音消息功能（需语音API）
 - [ ] 实现图片发送功能（需生图API）
+- [ ] 实现LLM结构化JSON响应解析器，按 `type` 字段分发不同消息组件
+- [ ] 实现统一聊天消息模型，承接 C++ 解析结果并供 Flutter 渲染层使用
+- [ ] 实现 `word`、`action`、`emoji`、`image`、`redpacket`、`transfer` 等可见消息气泡
+- [ ] 实现 `accept*`、`reject*` 对红包/转账卡片的状态更新逻辑
+- [ ] 实现 `thought`、`summary`、`memory`、`diary`、`system` 等非直接展示消息的存储与控制逻辑
+- [ ] 实现 `moment`、`moment_comment`、`moment_like` 对朋友圈模块的数据驱动逻辑
+- [ ] 实现消息解析失败、未知类型、字段缺失时的容错与日志记录
+
+
+### 3.2.1 上下文管理机制
+- [ ] 实现上下文组装器，区分 System Prompt 与 User Prompt
+- [ ] 按固定顺序组装 System Prompt：系统日期、系统时间、主系统提示词、AI角色人设、用户人设、世界书、预设、动态summary、AI角色记忆memory、可用表情包列表
+- [ ] 实现动态summary每轮更新与持久化存储
+- [ ] 实现summary自然语言直接存储，不做额外结构化拆分
+- [ ] 实现AI角色memory长期记忆注入机制
+- [ ] 实现聊天记录按设置条数动态截取
+- [ ] 实现更早聊天内容由summary承接的上下文机制
+- [ ] 实现世界书与预设作为纯文本固定注入System Prompt
+- [ ] 实现可用表情包列表注入，包含ID和语义说明
+- [ ] 实现上下文拼装调试能力，便于排查角色偏离、记忆异常、summary异常
 
 ### 3.3 联系人模块
 - [ ] 实现联系人列表页面
@@ -227,6 +247,8 @@
 - [ ] 实现生图API配置
 - [ ] 实现语音API配置
 - [ ] 实现多个API预设配置
+- [ ] 实现聊天记录截取条数设置
+- [ ] 实现上下文来源查看入口（主系统提示词/人设/世界书/预设/summary/memory）
 
 ### 4.3 应用数据管理
 - [ ] 实现数据管理页面
@@ -242,6 +264,10 @@
 - [ ] 实现聊天记录存储
 - [ ] 实现AI角色配置存储
 - [ ] 实现用户设置存储
+- [ ] 实现动态summary存储
+- [ ] 实现AI角色memory存储
+- [ ] 实现世界书与预设文本存储
+- [ ] 实现表情包配置存储
 
 ### 5.2 数据操作
 - [ ] 实现数据插入功能
@@ -267,6 +293,7 @@
 - [ ] 实现RapidJSON解析
 - [ ] 实现响应数据解析
 - [ ] 实现流式输出处理
+- [ ] 实现统一请求体构建，按上下文管理机制拼装system prompt与user prompt
 
 ---
 
@@ -281,6 +308,7 @@
 - [ ] 实现Flutter数据序列化
 - [ ] 实现C++数据序列化
 - [ ] 实现双向数据传递
+- [ ] 实现上下文配置与调试信息的桥接传输
 
 ---
 
@@ -290,9 +318,11 @@
 - [ ] C++层Google Test测试
 - [ ] Flutter层flutter_test测试
 - [ ] Flutter层mockito单元测试
+- [ ] 增加上下文组装顺序、summary更新、memory注入、聊天记录截取的单元测试
 
 ### 8.2 集成测试
 - [ ] 端到端功能测试
+- [ ] 验证不同聊天条数配置下的上下文拼装行为
 
 ### 8.3 打包部署
 - [x] 配置GitHub Actions iOS打包
