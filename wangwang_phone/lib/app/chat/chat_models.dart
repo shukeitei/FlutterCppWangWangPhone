@@ -53,6 +53,20 @@ class ChatContact {
   final String emoji;
 }
 
+class ChatContactDraft {
+  const ChatContactDraft({
+    required this.name,
+    required this.signature,
+    required this.personaSummary,
+    this.initialGreeting = '',
+  });
+
+  final String name;
+  final String signature;
+  final String personaSummary;
+  final String initialGreeting;
+}
+
 class ChatThread {
   const ChatThread({
     required this.contactId,

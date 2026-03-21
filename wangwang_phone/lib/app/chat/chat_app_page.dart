@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../shared/ui.dart';
+import 'chat_contact_editor_page.dart';
 import 'chat_controller.dart';
+import 'chat_moment_composer_page.dart';
 import 'chat_models.dart';
 
 class ChatAppPage extends StatefulWidget {
@@ -150,8 +152,13 @@ class _ChatAppPageState extends State<ChatAppPage> {
         controller: _controller,
         onOpenConversation: _openConversation,
         onOpenContact: _openContact,
+        onCreateContact: _openCreateContact,
+        onImportContact: _openImportContact,
       ),
-      ChatTab.moments => _MomentsTab(controller: _controller),
+      ChatTab.moments => _MomentsTab(
+        controller: _controller,
+        onCreateMoment: _openMomentComposer,
+      ),
       ChatTab.profile => _ProfileTab(controller: _controller),
     };
   }
@@ -172,6 +179,48 @@ class _ChatAppPageState extends State<ChatAppPage> {
           onOpenConversation: _openConversation,
         ),
       ),
+    );
+  }
+
+  Future<void> _openCreateContact() async {
+    final createdContact = await Navigator.of(context).push<ChatContact>(
+      _buildRoute(ContactEditorPage(controller: _controller)),
+    );
+
+    if (!mounted || createdContact == null) {
+      return;
+    }
+
+    _openContact(createdContact);
+  }
+
+  Future<void> _openImportContact() async {
+    final createdContact = await Navigator.of(context).push<ChatContact>(
+      _buildRoute(
+        ContactEditorPage(controller: _controller, startWithImport: true),
+      ),
+    );
+
+    if (!mounted || createdContact == null) {
+      return;
+    }
+
+    _openContact(createdContact);
+  }
+
+  Future<void> _openMomentComposer() async {
+    final result = await Navigator.of(context).push<MomentComposerResult>(
+      _buildRoute(MomentComposerPage(contacts: _controller.contacts)),
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    _controller.addMoment(
+      contactId: result.contactId,
+      content: result.content,
+      moodLabel: result.moodLabel,
     );
   }
 }
@@ -721,11 +770,15 @@ class _ContactsTab extends StatelessWidget {
     required this.controller,
     required this.onOpenConversation,
     required this.onOpenContact,
+    required this.onCreateContact,
+    required this.onImportContact,
   });
 
   final ChatAppController controller;
   final ValueChanged<ChatContact> onOpenConversation;
   final ValueChanged<ChatContact> onOpenContact;
+  final Future<void> Function() onCreateContact;
+  final Future<void> Function() onImportContact;
 
   @override
   Widget build(BuildContext context) {
@@ -736,15 +789,57 @@ class _ContactsTab extends StatelessWidget {
       children: [
         FrostPanel(
           padding: const EdgeInsets.all(18),
-          child: Text(
-            '这里展示你导入或创建的人设角色。现在先用内置示例数据打通联系人浏览和发消息流程。',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: palette.primaryText,
-              height: 1.6,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '这里展示你导入或创建的人设角色。现在已经支持手动创建联系人，也可以从 TXT 自动回填角色设定。',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: palette.primaryText,
+                  height: 1.6,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      key: const Key('create_contact_button'),
+                      onPressed: () {
+                        onCreateContact();
+                      },
+                      icon: const Icon(Icons.person_add_alt_1_rounded),
+                      label: const Text('新建联系人'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('import_contact_button'),
+                      onPressed: () {
+                        onImportContact();
+                      },
+                      icon: const Icon(Icons.upload_file_rounded),
+                      label: const Text('导入TXT'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 18),
+        if (controller.contacts.isEmpty)
+          FrostPanel(
+            padding: const EdgeInsets.all(18),
+            borderRadius: 24,
+            child: Text(
+              '还没有联系人，先创建一个角色试试。',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.copyWith(color: palette.secondaryText),
+            ),
+          ),
         ...controller.contacts.map((contact) {
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -825,9 +920,10 @@ class _ContactsTab extends StatelessWidget {
 }
 
 class _MomentsTab extends StatelessWidget {
-  const _MomentsTab({required this.controller});
+  const _MomentsTab({required this.controller, required this.onCreateMoment});
 
   final ChatAppController controller;
+  final Future<void> Function() onCreateMoment;
 
   @override
   Widget build(BuildContext context) {
@@ -835,77 +931,105 @@ class _MomentsTab extends StatelessWidget {
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      children: controller.moments.map((moment) {
-        final contact = controller.contactById(moment.contactId);
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: FrostPanel(
-            padding: const EdgeInsets.all(16),
-            borderRadius: 26,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    _Avatar(
-                      color: contact.avatarColor,
-                      label: contact.emoji,
-                      size: 44,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            contact.name,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(
-                                  color: palette.primaryText,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${moment.moodLabel} · ${_formatMomentTime(moment.publishedAt)}',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: palette.secondaryText),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  moment.content,
+      children: [
+        FrostPanel(
+          padding: const EdgeInsets.all(18),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '朋友圈已经支持手动发布动态，后续再接 AI 自动生成和评论联动。',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: palette.primaryText,
-                    height: 1.7,
+                    height: 1.6,
                   ),
                 ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    _MomentMeta(
-                      icon: Icons.favorite_rounded,
-                      label: '${moment.likes} 喜欢',
-                      color: palette.secondaryAccentColor,
-                    ),
-                    const SizedBox(width: 10),
-                    _MomentMeta(
-                      icon: Icons.mode_comment_rounded,
-                      label: '${moment.comments} 评论',
-                      color: palette.accentColor,
-                    ),
-                  ],
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                key: const Key('create_moment_button'),
+                onPressed: () {
+                  onCreateMoment();
+                },
+                icon: const Icon(Icons.add_photo_alternate_rounded),
+                label: const Text('发布'),
+              ),
+            ],
           ),
-        );
-      }).toList(),
+        ),
+        const SizedBox(height: 18),
+        ...controller.moments.map((moment) {
+          final contact = controller.contactById(moment.contactId);
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: FrostPanel(
+              padding: const EdgeInsets.all(16),
+              borderRadius: 26,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _Avatar(
+                        color: contact.avatarColor,
+                        label: contact.emoji,
+                        size: 44,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              contact.name,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    color: palette.primaryText,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${moment.moodLabel} · ${_formatMomentTime(moment.publishedAt)}',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: palette.secondaryText),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    moment.content,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: palette.primaryText,
+                      height: 1.7,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      _MomentMeta(
+                        icon: Icons.favorite_rounded,
+                        label: '${moment.likes} 喜欢',
+                        color: palette.secondaryAccentColor,
+                      ),
+                      const SizedBox(width: 10),
+                      _MomentMeta(
+                        icon: Icons.mode_comment_rounded,
+                        label: '${moment.comments} 评论',
+                        color: palette.accentColor,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
     );
   }
 }

@@ -89,6 +89,25 @@ void main() {
     );
   });
 
+  test('TXT人设可以解析成联系人草稿', () {
+    final controller = ChatAppController.seeded();
+
+    final draft = controller.draftFromImportedText(
+      fileName: '小雨.txt',
+      content: '''
+名字：小雨
+签名：晚风会替我说想你
+人设：温柔系夜聊搭子，擅长安慰情绪，也会分享喜欢的歌。
+开场白：你好呀，我刚抱着热牛奶坐下，你今天过得怎么样？
+''',
+    );
+
+    expect(draft.name, '小雨');
+    expect(draft.signature, '晚风会替我说想你');
+    expect(draft.personaSummary, contains('温柔系夜聊搭子'));
+    expect(draft.initialGreeting, contains('热牛奶'));
+  });
+
   testWidgets('桌面展示天气小组件与应用图标', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
     await tester.pump();
@@ -190,6 +209,72 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('先抱抱你一下'), findsOneWidget);
+  });
+
+  testWidgets('联系人页支持直接创建新联系人', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('微信'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('联系人').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('create_contact_button')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('contact_name_field')), '小雨');
+    await tester.enterText(
+      find.byKey(const Key('contact_signature_field')),
+      '晚风会替我说想你',
+    );
+    await tester.enterText(
+      find.byKey(const Key('contact_persona_field')),
+      '温柔系夜聊搭子，擅长安慰情绪，也会分享喜欢的歌。',
+    );
+    await tester.enterText(
+      find.byKey(const Key('contact_greeting_field')),
+      '你好呀，我刚抱着热牛奶坐下。',
+    );
+
+    await tester.ensureVisible(find.byKey(const Key('contact_save_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('contact_save_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('小雨'), findsWidgets);
+    expect(find.textContaining('温柔系夜聊搭子'), findsOneWidget);
+    expect(find.text('发消息'), findsOneWidget);
+  });
+
+  testWidgets('朋友圈支持发布新动态', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('微信'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('朋友圈').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('create_moment_button')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('moment_mood_field')), '夜晚心情');
+    await tester.enterText(
+      find.byKey(const Key('moment_content_field')),
+      '今晚的风很轻，适合把没说完的话慢慢讲完。',
+    );
+    await tester.ensureVisible(find.byKey(const Key('moment_publish_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('moment_publish_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('夜晚心情'), findsOneWidget);
+    expect(find.textContaining('今晚的风很轻'), findsOneWidget);
   });
 
   testWidgets('切换华氏度后桌面与天气详情同步更新', (WidgetTester tester) async {

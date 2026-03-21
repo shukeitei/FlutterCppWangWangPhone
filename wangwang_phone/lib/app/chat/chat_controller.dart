@@ -84,6 +84,134 @@ class ChatAppController extends ChangeNotifier {
     _activeConversationId = null;
   }
 
+  ChatContact addContact({
+    required String name,
+    required String signature,
+    required String personaSummary,
+    String initialGreeting = '',
+  }) {
+    final trimmedName = name.trim();
+    final trimmedSignature = signature.trim();
+    final trimmedPersona = personaSummary.trim();
+    final trimmedGreeting = initialGreeting.trim();
+
+    final contactId = _buildContactId(trimmedName);
+    final contact = ChatContact(
+      id: contactId,
+      name: trimmedName,
+      signature: trimmedSignature.isEmpty ? '新的陪伴角色已加入。' : trimmedSignature,
+      personaSummary: trimmedPersona,
+      statusLabel: '在线 · 刚加入汪汪机',
+      avatarColor: _colorForContact(contactId),
+      emoji: _avatarLabelForName(trimmedName),
+    );
+
+    final introMessage = trimmedGreeting.isEmpty
+        ? '你好呀，我是${contact.name}。我已经准备好认识你了，想先从今天的心情开始聊吗？'
+        : trimmedGreeting;
+
+    final now = DateTime.now();
+    _contacts.insert(0, contact);
+    _threads[contactId] = ChatThread(
+      contactId: contactId,
+      lastMessage: introMessage,
+      updatedAt: now,
+      unreadCount: 1,
+    );
+    _messages[contactId] = [
+      ChatMessage(
+        id: '$contactId-${now.microsecondsSinceEpoch}',
+        contactId: contactId,
+        sender: ChatMessageSender.ai,
+        text: introMessage,
+        sentAt: now,
+      ),
+    ];
+
+    notifyListeners();
+    return contact;
+  }
+
+  MomentPost addMoment({
+    required String contactId,
+    required String content,
+    required String moodLabel,
+  }) {
+    final now = DateTime.now();
+    final moment = MomentPost(
+      id: 'moment-${now.microsecondsSinceEpoch}',
+      contactId: contactId,
+      content: content.trim(),
+      publishedAt: now,
+      likes: 0,
+      comments: 0,
+      moodLabel: moodLabel.trim().isEmpty ? '今日分享' : moodLabel.trim(),
+    );
+
+    _moments.insert(0, moment);
+    notifyListeners();
+    return moment;
+  }
+
+  ChatContact importContactFromText({
+    required String fileName,
+    required String content,
+  }) {
+    final draft = draftFromImportedText(fileName: fileName, content: content);
+    return addContact(
+      name: draft.name,
+      signature: draft.signature,
+      personaSummary: draft.personaSummary,
+      initialGreeting: draft.initialGreeting,
+    );
+  }
+
+  /// 把导入的 TXT 文本转换成联系人草稿，优先解析结构化字段，解析不到再回退到摘要提取。
+  ChatContactDraft draftFromImportedText({
+    required String fileName,
+    required String content,
+  }) {
+    final normalizedContent = content
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .trim();
+    final lines = normalizedContent
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+
+    final fileBaseName = fileName.contains('.')
+        ? fileName.substring(0, fileName.lastIndexOf('.'))
+        : fileName;
+    final name =
+        _extractField(lines: lines, keys: const ['名字', '名称', '角色名', 'name']) ??
+        (fileBaseName.trim().isNotEmpty ? fileBaseName.trim() : '新角色');
+    final signature =
+        _extractField(
+          lines: lines,
+          keys: const ['签名', '简介', '设定一句话', 'signature'],
+        ) ??
+        _buildFallbackSignature(normalizedContent);
+    final personaSummary =
+        _extractField(
+          lines: lines,
+          keys: const ['人设', '设定', 'persona', 'profile'],
+        ) ??
+        _buildFallbackPersonaSummary(normalizedContent);
+    final greeting = _extractField(
+      lines: lines,
+      keys: const ['开场白', '初始消息', 'greeting'],
+    );
+
+    return ChatContactDraft(
+      name: name,
+      signature: signature,
+      personaSummary: personaSummary,
+      initialGreeting: greeting ?? '',
+    );
+  }
+
   /// 发送用户消息后，立即更新会话列表，再异步追加一条角色回复，模拟聊天链路闭环。
   Future<void> sendTextMessage({
     required String contactId,
@@ -194,6 +322,72 @@ class ChatAppController extends ChangeNotifier {
 
     _threads[contactId] = thread.copyWith(unreadCount: 0);
     notifyListeners();
+  }
+
+  String _buildContactId(String name) {
+    final normalized = name.trim().toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9\u4e00-\u9fa5]+'),
+      '_',
+    );
+    final baseId = normalized.isEmpty ? 'contact' : normalized;
+    if (!_threads.containsKey(baseId)) {
+      return baseId;
+    }
+    return '${baseId}_${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  Color _colorForContact(String contactId) {
+    const palette = [
+      Color(0xFF79C77B),
+      Color(0xFF7E8DFF),
+      Color(0xFFFFA56C),
+      Color(0xFFFFC65C),
+      Color(0xFFEF7FB0),
+      Color(0xFF68B9D8),
+    ];
+    final index =
+        contactId.runes.fold<int>(0, (sum, rune) => sum + rune) %
+        palette.length;
+    return palette[index];
+  }
+
+  String? _extractField({
+    required List<String> lines,
+    required List<String> keys,
+  }) {
+    for (final line in lines) {
+      for (final key in keys) {
+        final pattern = RegExp('^$key[:：]\\s*(.+)\$', caseSensitive: false);
+        final match = pattern.firstMatch(line);
+        if (match != null) {
+          return match.group(1)?.trim();
+        }
+      }
+    }
+    return null;
+  }
+
+  String _buildFallbackSignature(String content) {
+    final compact = content.replaceAll('\n', ' ').trim();
+    if (compact.isEmpty) {
+      return '新的陪伴角色已加入。';
+    }
+    return compact.length <= 24 ? compact : '${compact.substring(0, 24)}...';
+  }
+
+  String _buildFallbackPersonaSummary(String content) {
+    final compact = content.replaceAll('\n', ' ').trim();
+    if (compact.isEmpty) {
+      return '还没有填写详细人设。';
+    }
+    return compact.length <= 88 ? compact : '${compact.substring(0, 88)}...';
+  }
+
+  String _avatarLabelForName(String name) {
+    if (name.isEmpty) {
+      return '新';
+    }
+    return String.fromCharCode(name.runes.first);
   }
 
   @override
