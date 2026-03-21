@@ -202,7 +202,7 @@
 ### 3.2.1 上下文管理机制
 - [x] 实现上下文组装器，区分 System Prompt 与 User Prompt
 - [x] 按固定顺序组装 System Prompt：系统日期、系统时间、主系统提示词、AI角色人设、用户人设、世界书、预设、动态summary、AI角色记忆memory、可用表情包列表
-- [ ] 实现动态summary每轮更新与持久化存储
+- [x] 实现动态summary每轮更新与持久化存储
 - [x] 实现summary自然语言直接存储，不做额外结构化拆分
 - [x] 实现AI角色memory长期记忆注入机制
 - [x] 实现聊天记录按设置条数动态截取

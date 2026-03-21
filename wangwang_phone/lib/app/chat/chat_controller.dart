@@ -5,9 +5,10 @@ import 'package:flutter/material.dart';
 import 'chat_context.dart';
 import 'chat_message_payloads.dart';
 import 'chat_models.dart';
+import 'chat_summary_store.dart';
 
 class ChatAppController extends ChangeNotifier {
-  ChatAppController.seeded()
+  ChatAppController.seeded({ChatSummaryStore? summaryStore})
     : _contacts = List<ChatContact>.from(ChatSeedData.contacts),
       _threads = Map<String, ChatThread>.from(ChatSeedData.threads),
       _messages = {
@@ -36,7 +37,8 @@ class ChatAppController extends ChangeNotifier {
         ChatEmojiEntry(id: 'sparkle', symbol: '✨', description: '灵感和开心'),
       ],
       _contextAssembler = const ChatContextAssembler(),
-      _summaryGenerator = const ChatSummaryGenerator();
+      _summaryGenerator = const ChatSummaryGenerator(),
+      _summaryStore = summaryStore ?? buildDefaultChatSummaryStore();
 
   final List<ChatContact> _contacts;
   final Map<String, ChatThread> _threads;
@@ -52,6 +54,7 @@ class ChatAppController extends ChangeNotifier {
   final List<ChatEmojiEntry> _emojiCatalog;
   final ChatContextAssembler _contextAssembler;
   final ChatSummaryGenerator _summaryGenerator;
+  final ChatSummaryStore _summaryStore;
   final Set<String> _typingContacts = <String>{};
   final Map<String, ChatContextBundle> _lastContextBundles = {};
 
@@ -129,6 +132,19 @@ class ChatAppController extends ChangeNotifier {
 
   ChatContextBundle? lastContextBundleFor(String contactId) =>
       _lastContextBundles[contactId];
+
+  /// 启动时从本地恢复动态 summary，让上下文拼装在首次打开聊天时就能拿到上次保存的摘要。
+  Future<void> loadPersistedSummaries() async {
+    final storedSummaries = await _summaryStore.loadSummaries();
+    if (storedSummaries.isEmpty) {
+      return;
+    }
+
+    _summaries.addAll(storedSummaries);
+    if (!_disposed) {
+      notifyListeners();
+    }
+  }
 
   List<ChatMessage> messagesFor(String contactId) {
     return List<ChatMessage>.unmodifiable(_messages[contactId] ?? const []);
@@ -261,17 +277,23 @@ class ChatAppController extends ChangeNotifier {
   }
 
   /// 统一承接结构化 payload。可见类型会进聊天列表，隐藏类型则进入各自的数据存储。
-  void ingestStructuredPayloads({
+  Future<void> ingestStructuredPayloads({
     required String contactId,
     required List<Map<String, dynamic>> payloads,
     ChatMessageSender sender = ChatMessageSender.ai,
-  }) {
+  }) async {
+    var summaryUpdated = false;
     for (final payload in payloads) {
-      _ingestStructuredPayload(
+      summaryUpdated =
+          _ingestStructuredPayload(
         contactId: contactId,
         payload: payload,
         sender: sender,
-      );
+      ) ||
+          summaryUpdated;
+    }
+    if (summaryUpdated) {
+      await _summaryStore.saveSummaries(_summaries);
     }
     notifyListeners();
   }
@@ -378,12 +400,12 @@ class ChatAppController extends ChangeNotifier {
       contact: contact,
       userMessage: trimmed,
     );
-    ingestStructuredPayloads(contactId: contactId, payloads: replyPayloads);
+    await ingestStructuredPayloads(contactId: contactId, payloads: replyPayloads);
     final hasExplicitSummary = replyPayloads.any(
       (payload) => payload['type']?.toString().toLowerCase() == 'summary',
     );
     if (!hasExplicitSummary) {
-      _refreshDynamicSummary(contactId);
+      await _refreshDynamicSummary(contactId);
     }
     buildContextBundle(contactId: contactId, latestUserInput: trimmed);
   }
@@ -597,7 +619,7 @@ class ChatAppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _ingestStructuredPayload({
+  bool _ingestStructuredPayload({
     required String contactId,
     required Map<String, dynamic> payload,
     required ChatMessageSender sender,
@@ -622,6 +644,7 @@ class ChatAppController extends ChangeNotifier {
           content: body.content,
           updatedAt: timestamp,
         );
+        return true;
       case MemoryMessageBody():
         _memories.insert(
           0,
@@ -682,6 +705,7 @@ class ChatAppController extends ChangeNotifier {
           timestamp: timestamp,
         );
     }
+    return false;
   }
 
   void _appendVisibleStructuredMessage({
@@ -760,7 +784,7 @@ class ChatAppController extends ChangeNotifier {
     return _moments.isNotEmpty ? _moments.first.id : null;
   }
 
-  void _refreshDynamicSummary(String contactId) {
+  Future<void> _refreshDynamicSummary(String contactId) async {
     final contact = contactById(contactId);
     final summaryContent = _summaryGenerator.generate(
       contact: contact,
@@ -771,6 +795,7 @@ class ChatAppController extends ChangeNotifier {
       content: summaryContent,
       updatedAt: DateTime.now(),
     );
+    await _summaryStore.saveSummaries(_summaries);
   }
 
   void _updateMoneyCardStatus({

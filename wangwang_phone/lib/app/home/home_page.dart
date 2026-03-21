@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../chat/chat_app_page.dart';
 import '../chat/chat_controller.dart';
 import '../chat/memory_app_page.dart';
+import '../chat/chat_summary_store.dart';
 import '../shared/ui.dart';
 import '../weather/weather_detail_page.dart';
 import '../weather/weather_repository.dart';
@@ -76,7 +77,9 @@ class _HomePageState extends State<HomePage> {
     _temperatureUnitController = TemperatureUnitController(
       store: widget.weatherSettingsStore,
     )..load();
-    _chatController = ChatAppController.seeded();
+    _chatController = ChatAppController.seeded(
+      summaryStore: buildDefaultChatSummaryStore(),
+    )..loadPersistedSummaries();
   }
 
   @override

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:wangwang_phone/main.dart';
 
@@ -60,6 +61,12 @@ WangWangApp _buildTestApp({MemoryWeatherSettingsStore? settingsStore}) {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   test('7timer天气类型映射正确', () {
     expect(
       SevenTimerWeatherCodeMapper.fromApiValue(
@@ -127,15 +134,17 @@ void main() {
     expect(redPacketBody.previewText, contains('红包'));
   });
 
-  test('隐藏消息会落到summary memory diary并驱动朋友圈', () {
-    final controller = ChatAppController.seeded();
+  test('隐藏消息会落到summary memory diary并驱动朋友圈', () async {
+    final controller = ChatAppController.seeded(
+      summaryStore: MemoryChatSummaryStore(),
+    );
     final beforeMemories = controller.memories.length;
     final beforeDiaries = controller.diaries.length;
     final beforeThoughts = controller.thoughts.length;
     final beforeSystems = controller.systemEntries.length;
     final beforeMoments = controller.moments.length;
 
-    controller.ingestStructuredPayloads(
+    await controller.ingestStructuredPayloads(
       contactId: 'ari',
       payloads: [
         {'type': 'summary', 'content': '阿梨更新了一段新的陪伴总结。'},
@@ -153,7 +162,7 @@ void main() {
     );
 
     final latestMoment = controller.moments.first;
-    controller.ingestStructuredPayloads(
+    await controller.ingestStructuredPayloads(
       contactId: 'yuejian',
       payloads: [
         {'type': 'moment_like', 'momentId': latestMoment.id},
@@ -173,6 +182,27 @@ void main() {
     expect(controller.moments.length, beforeMoments + 1);
     expect(controller.moments.first.likedByContactIds, contains('yuejian'));
     expect(controller.moments.first.comments.last.content, contains('气氛很温柔'));
+  });
+
+  test('动态summary会持久化并在新控制器中恢复', () async {
+    final summaryStore = MemoryChatSummaryStore();
+    final firstController = ChatAppController.seeded(
+      summaryStore: summaryStore,
+    );
+
+    await firstController.ingestStructuredPayloads(
+      contactId: 'ari',
+      payloads: [
+        {'type': 'summary', 'content': '阿梨已经记住你最近更需要柔和、低压的陪伴语气。'},
+      ],
+    );
+
+    final secondController = ChatAppController.seeded(
+      summaryStore: summaryStore,
+    );
+    await secondController.loadPersistedSummaries();
+
+    expect(secondController.summaryFor('ari')?.content, contains('更需要柔和'));
   });
 
   test('上下文组装器会按固定顺序拼接system prompt并注入memory', () {
