@@ -1,21 +1,21 @@
-# 汪汪机 (WangWang Phone)
+# 汪汪机
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Android-blue" alt="Platform">
   <img src="https://img.shields.io/badge/language-C%2B%2B%20%7C%20Flutter-yellow" alt="Language">
-  <img src="https://img.shields.io/badge/license-CC%20BY-NC--SA%204.0-green" alt="License">
-  <img src="https://img.shields.io/badge/version-1.0.0-orange" alt="Version">
+  <img src="https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-34c759" alt="License">
+  <img src="https://img.shields.io/badge/version-3.4.8-orange" alt="Version">
 </p>
 
 <p align="center">
-  <strong>像小狗一样陪伴你的AI-Native虚拟操作系统</strong>
+  <strong>万象成澜，相由心生</strong>
 </p>
 
 ---
 
 ## 📱 项目简介
 
-汪汪机是一款AI-Native虚拟操作系统产品（行业内称为"小手机"），旨在为用户提供情感陪伴和社交体验。产品像小狗一样陪伴用户，主要面向18-28岁年轻女性（缺少陪伴的群体）。
+汪汪机是一款AI-Native小手机，旨在为用户提供情感陪伴和社交体验。
 
 ### 核心特性
 
