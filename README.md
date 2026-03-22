@@ -1,8 +1,8 @@
-<h1 align="center">汪汪机</h1>
-
 <p align="center">
   <img src="asset/app_logo.png" alt="汪汪机 Logo" width="180">
 </p>
+
+<h1 align="center">汪汪机</h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Android-blue" alt="Platform">
