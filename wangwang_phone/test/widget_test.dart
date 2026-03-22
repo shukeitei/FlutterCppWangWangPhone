@@ -60,11 +60,19 @@ WangWangApp _buildTestApp({MemoryWeatherSettingsStore? settingsStore}) {
   );
 }
 
+Map<String, Object> _defaultStartupPrefs() {
+  return const {
+    StartupPreferenceKeys.skipSplash: true,
+    StartupPreferenceKeys.skipLockScreen: true,
+    StartupPreferenceKeys.passcode: '246810',
+  };
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(_defaultStartupPrefs());
   });
 
   test('7timer天气类型映射正确', () {
@@ -260,6 +268,74 @@ void main() {
     expect(bundle.selectedMessages.length, 2);
     expect(bundle.usedSummaryBridge, isTrue);
     expect(bundle.userPrompt, contains('更早聊天内容已由 summary 承接'));
+  });
+
+  testWidgets('首次启动会经过开屏和密码设置后进入主屏幕', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
+
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(find.byKey(const Key('startup_splash_page')), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 2400));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('startup_passcode_setup_page')), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('startup_passcode_field')),
+      '246810',
+    );
+    await tester.tap(find.byKey(const Key('startup_passcode_submit')));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('深圳市'), findsOneWidget);
+    expect(find.text('微信'), findsOneWidget);
+  });
+
+  testWidgets('已有密码时会经过锁屏和密码解锁后进入主屏幕', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues(const {
+      StartupPreferenceKeys.passcode: '246810',
+    });
+
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(find.byKey(const Key('startup_splash_page')), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 2400));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('startup_lock_page')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('startup_lock_unlock_area')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('startup_passcode_unlock_page')), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('startup_passcode_field')),
+      '111111',
+    );
+    await tester.tap(find.byKey(const Key('startup_passcode_submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('密码不正确，请重新输入'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('startup_passcode_field')),
+      '246810',
+    );
+    await tester.tap(find.byKey(const Key('startup_passcode_submit')));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('深圳市'), findsOneWidget);
+    expect(find.text('微信'), findsOneWidget);
   });
 
   testWidgets('桌面展示天气小组件与应用图标', (WidgetTester tester) async {

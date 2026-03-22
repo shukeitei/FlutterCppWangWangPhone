@@ -11,6 +11,7 @@ export 'app/chat/chat_context_debug_page.dart';
 export 'app/chat/chat_message_payloads.dart';
 export 'app/chat/chat_models.dart';
 export 'app/chat/chat_summary_store.dart';
+export 'app/startup/startup_flow_page.dart';
 export 'app/weather/weather_repository.dart';
 export 'app/weather/weather_settings.dart';
 export 'app/weather/weather_types.dart';
