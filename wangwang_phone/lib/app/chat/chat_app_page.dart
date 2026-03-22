@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 
 import '../shared/ui.dart';
@@ -7,6 +9,8 @@ import 'chat_controller.dart';
 import 'chat_message_payloads.dart';
 import 'chat_moment_composer_page.dart';
 import 'chat_models.dart';
+
+const double _chatBottomNavigationHeight = 74;
 
 class ChatAppPage extends StatefulWidget {
   const ChatAppPage({super.key, required this.controller});
@@ -29,6 +33,7 @@ class _ChatAppPageState extends State<ChatAppPage> {
 
         return Scaffold(
           key: const Key('chat_app_page'),
+          extendBody: true,
           body: Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -68,13 +73,20 @@ class _ChatAppPageState extends State<ChatAppPage> {
                         },
                       ),
                       Expanded(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 220),
-                          switchInCurve: Curves.easeOutCubic,
-                          switchOutCurve: Curves.easeInCubic,
-                          child: KeyedSubtree(
-                            key: ValueKey(tab),
-                            child: _buildTabBody(tab),
+                        child: Padding(
+                          // 贴边底栏改为沉浸式后，需要给内容区预留固定高度，
+                          // 否则最后一张卡片会被底部导航覆盖。
+                          padding: const EdgeInsets.only(
+                            bottom: _chatBottomNavigationHeight,
+                          ),
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            switchInCurve: Curves.easeOutCubic,
+                            switchOutCurve: Curves.easeInCubic,
+                            child: KeyedSubtree(
+                              key: ValueKey(tab),
+                              child: _buildTabBody(tab),
+                            ),
                           ),
                         ),
                       ),
@@ -84,48 +96,11 @@ class _ChatAppPageState extends State<ChatAppPage> {
               ],
             ),
           ),
-          bottomNavigationBar: SafeArea(
-            minimum: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Theme(
-              data: Theme.of(context).copyWith(
-                navigationBarTheme: NavigationBarThemeData(
-                  height: 74,
-                  backgroundColor: palette.navigationSurface,
-                  indicatorColor: palette.navigationIndicator,
-                  labelTextStyle: WidgetStateProperty.resolveWith((states) {
-                    final selected = states.contains(WidgetState.selected);
-                    return TextStyle(
-                      color: selected
-                          ? palette.navigationSelectedText
-                          : palette.navigationUnselectedText,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    );
-                  }),
-                  iconTheme: WidgetStateProperty.resolveWith((states) {
-                    final selected = states.contains(WidgetState.selected);
-                    return IconThemeData(
-                      color: selected
-                          ? palette.navigationSelectedText
-                          : palette.navigationUnselectedText,
-                    );
-                  }),
-                ),
-              ),
-              child: NavigationBar(
-                selectedIndex: ChatTab.values.indexOf(tab),
-                onDestinationSelected: (index) {
-                  widget.controller.selectTab(ChatTab.values[index]);
-                },
-                destinations: ChatTab.values
-                    .map(
-                      (tabItem) => NavigationDestination(
-                        icon: Icon(tabItem.icon),
-                        label: tabItem.label,
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
+          bottomNavigationBar: _ChatBottomNavigationBar(
+            selectedTab: tab,
+            onDestinationSelected: (index) {
+              widget.controller.selectTab(ChatTab.values[index]);
+            },
           ),
         );
       },
@@ -211,6 +186,84 @@ class _ChatAppPageState extends State<ChatAppPage> {
       contactId: result.contactId,
       content: result.content,
       moodLabel: result.moodLabel,
+    );
+  }
+}
+
+/// 把系统手势区并入聊天底栏，避免全面屏设备底部出现悬浮矩形。
+class _ChatBottomNavigationBar extends StatelessWidget {
+  const _ChatBottomNavigationBar({
+    required this.selectedTab,
+    required this.onDestinationSelected,
+  });
+
+  final ChatTab selectedTab;
+  final ValueChanged<int> onDestinationSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+    final brightness = Theme.of(context).brightness;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final borderColor =
+        brightness == Brightness.dark
+            ? const Color(0x24FFFFFF)
+            : const Color(0x121E2A24);
+
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          key: const Key('chat_bottom_navigation_shell'),
+          decoration: BoxDecoration(
+            color: palette.navigationSurface,
+            border: Border(top: BorderSide(color: borderColor)),
+          ),
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: Theme(
+            data: Theme.of(context).copyWith(
+              navigationBarTheme: NavigationBarThemeData(
+                height: _chatBottomNavigationHeight,
+                backgroundColor: Colors.transparent,
+                indicatorColor: palette.navigationIndicator,
+                labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                  final selected = states.contains(WidgetState.selected);
+                  return TextStyle(
+                    color: selected
+                        ? palette.navigationSelectedText
+                        : palette.navigationUnselectedText,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  );
+                }),
+                iconTheme: WidgetStateProperty.resolveWith((states) {
+                  final selected = states.contains(WidgetState.selected);
+                  return IconThemeData(
+                    color: selected
+                        ? palette.navigationSelectedText
+                        : palette.navigationUnselectedText,
+                  );
+                }),
+              ),
+            ),
+            child: NavigationBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              shadowColor: Colors.transparent,
+              surfaceTintColor: Colors.transparent,
+              selectedIndex: ChatTab.values.indexOf(selectedTab),
+              onDestinationSelected: onDestinationSelected,
+              destinations: ChatTab.values
+                  .map(
+                    (tabItem) => NavigationDestination(
+                      icon: Icon(tabItem.icon),
+                      label: tabItem.label,
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

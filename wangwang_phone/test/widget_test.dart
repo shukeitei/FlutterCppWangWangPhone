@@ -424,6 +424,29 @@ void main() {
     expect(find.text('阿梨'), findsOneWidget);
   });
 
+  testWidgets('聊天应用底栏贴边并启用底部沉浸式背景', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home_app_chat')));
+    await tester.pumpAndSettle();
+
+    final scaffold = tester.widget<Scaffold>(
+      find.byKey(const Key('chat_app_page')),
+    );
+    final navShellFinder = find.byKey(
+      const Key('chat_bottom_navigation_shell'),
+    );
+    final screenWidth =
+        tester.view.physicalSize.width / tester.view.devicePixelRatio;
+
+    expect(scaffold.extendBody, isTrue);
+    expect(navShellFinder, findsOneWidget);
+    expect(tester.getTopLeft(navShellFinder).dx, closeTo(0, 0.001));
+    expect(tester.getSize(navShellFinder).width, closeTo(screenWidth, 0.001));
+  });
+
   testWidgets('聊天详情支持打开上下文调试页', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
     await tester.pump();
