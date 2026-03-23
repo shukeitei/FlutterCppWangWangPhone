@@ -24,6 +24,18 @@ WeatherReport _buildFakeReport() {
       cityName: '深圳市',
     ),
     updatedAt: DateTime(2026, 3, 21, 10, 30),
+    currentForecast: SevenTimerForecastSlot(
+      at: DateTime(2026, 3, 21, 10),
+      weatherType: SevenTimerWeatherCode.clearDay,
+      temperature: 25,
+      cloudCover: 30,
+      relativeHumidity: 65,
+      windDirection: 'NE',
+      windSpeedLevel: 3,
+      precipitationType: SevenTimerPrecipitationType.none,
+      precipitationAmount: 0,
+      liftedIndex: 1,
+    ),
     dailyForecasts: List.generate(7, (index) {
       return SevenTimerDailyForecast(
         date: startDate.add(Duration(days: index)),
