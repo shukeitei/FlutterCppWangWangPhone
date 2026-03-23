@@ -141,57 +141,44 @@ class _HomePageState extends State<HomePage>
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: _isEditingIcons ? _exitIconEditMode : null,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Stack(
                       children: [
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 220),
-                          switchInCurve: Curves.easeOutCubic,
-                          switchOutCurve: Curves.easeInCubic,
-                          child: _isEditingIcons
-                              ? Padding(
-                                  key: const ValueKey('home_icon_edit_banner'),
-                                  padding: const EdgeInsets.only(bottom: 14),
-                                  child: _EditModeBanner(
-                                    onDone: _exitIconEditMode,
-                                  ),
-                                )
-                              : const SizedBox(
-                                  key: ValueKey('home_icon_edit_banner_hidden'),
-                                ),
+                        GridView.builder(
+                          key: const Key('home_app_grid'),
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: _items.length,
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 4,
+                                crossAxisSpacing: 18,
+                                mainAxisSpacing: 24,
+                                childAspectRatio: 0.82,
+                              ),
+                          itemBuilder: (context, index) {
+                            final item = _items[index];
+                            return KeyedSubtree(
+                              key: ValueKey(item.module),
+                              child: _AppIcon(
+                                item: item,
+                                isEditing: _isEditingIcons,
+                                isDragging: _draggingModule == item.module,
+                                jiggleAnimation: _iconJiggleController,
+                                onTap: () => _openApp(item),
+                                onDragStarted: () =>
+                                    _handleIconDragStarted(item),
+                                onDragMovedTo: (draggedItem) =>
+                                    _reorderHomeIcons(draggedItem, item),
+                                onDragFinished: _handleIconDragFinished,
+                              ),
+                            );
+                          },
                         ),
-                        Expanded(
-                          child: GridView.builder(
-                            key: const Key('home_app_grid'),
-                            physics: const BouncingScrollPhysics(),
-                            itemCount: _items.length,
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 4,
-                                  crossAxisSpacing: 18,
-                                  mainAxisSpacing: 24,
-                                  childAspectRatio: 0.82,
-                                ),
-                            itemBuilder: (context, index) {
-                              final item = _items[index];
-                              return KeyedSubtree(
-                                key: ValueKey(item.module),
-                                child: _AppIcon(
-                                  item: item,
-                                  isEditing: _isEditingIcons,
-                                  isDragging: _draggingModule == item.module,
-                                  jiggleAnimation: _iconJiggleController,
-                                  onTap: () => _openApp(item),
-                                  onDragStarted: () =>
-                                      _handleIconDragStarted(item),
-                                  onDragMovedTo: (draggedItem) =>
-                                      _reorderHomeIcons(draggedItem, item),
-                                  onDragFinished: _handleIconDragFinished,
-                                ),
-                              );
-                            },
+                        if (_isEditingIcons)
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: _EditModeBanner(onDone: _exitIconEditMode),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -553,13 +540,14 @@ class _EditModeBanner extends StatelessWidget {
 
     return FrostPanel(
       key: const Key('home_icon_edit_banner'),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      borderRadius: 20,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      borderRadius: 18,
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 32,
-            height: 32,
+            width: 28,
+            height: 28,
             decoration: BoxDecoration(
               color: palette.iconSurface,
               borderRadius: BorderRadius.circular(12),
@@ -568,20 +556,18 @@ class _EditModeBanner extends StatelessWidget {
             child: Icon(
               Icons.drag_indicator_rounded,
               color: palette.primaryText,
-              size: 20,
+              size: 18,
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              '桌面整理中，长按拖动图标排序，点空白也能退出',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: palette.primaryText,
-                fontWeight: FontWeight.w600,
-              ),
+          const SizedBox(width: 8),
+          Text(
+            '桌面整理中',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: palette.primaryText,
+              fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           TextButton(
             onPressed: onDone,
             child: const Text('完成'),
