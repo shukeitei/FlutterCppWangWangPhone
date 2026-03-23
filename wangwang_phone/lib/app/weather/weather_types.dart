@@ -53,36 +53,39 @@ class WeatherReport {
   const WeatherReport({
     required this.location,
     required this.updatedAt,
+    required this.currentForecast,
     required this.dailyForecasts,
   });
 
   final WeatherLocationConfig location;
   final DateTime updatedAt;
+  final SevenTimerForecastSlot currentForecast;
   final List<SevenTimerDailyForecast> dailyForecasts;
 
   String get cityName => location.cityName;
 
   SevenTimerDailyForecast get today => dailyForecasts.first;
 
-  WeatherType get weatherType => today.weatherType.toWidgetWeatherType();
+  WeatherType get weatherType => currentForecast.weatherType.toWidgetWeatherType();
 
-  int get currentTemperatureCelsius => today.averageTemperature;
+  int get currentTemperatureCelsius => currentForecast.temperature;
 
-  int get apparentTemperatureCelsius => today.apparentTemperature;
+  int get apparentTemperatureCelsius => currentForecast.apparentTemperature;
 
   int get highTemperatureCelsius => today.maxTemperature;
 
   int get lowTemperatureCelsius => today.minTemperature;
 
-  String get summary => today.buildSummary();
+  String get summary => currentForecast.buildSummary();
 
-  String get humidityLabel => today.humidityLabel;
+  String get humidityLabel => currentForecast.humidityLabel;
 
-  String get cloudCoverLabel => today.cloudCoverLabel;
+  String get cloudCoverLabel => currentForecast.cloudCoverLabel;
 
-  String get windLabel => '${today.windDirection} · ${today.windSpeedLabel}';
+  String get windLabel =>
+      '${currentForecast.windDirection} · ${currentForecast.windSpeedLabel}';
 
-  String get precipitationLabel => today.precipitationType.label;
+  String get precipitationLabel => currentForecast.precipitationType.label;
 
   String get coordinateLabel =>
       '${location.latitude.toStringAsFixed(2)}, ${location.longitude.toStringAsFixed(2)}';
@@ -220,6 +223,16 @@ extension SevenTimerPrecipitationTypePresentation
       SevenTimerPrecipitationType.snow => '降雪',
       SevenTimerPrecipitationType.freezingRain => '冻雨',
       SevenTimerPrecipitationType.icePellets => '冰粒',
+    };
+  }
+
+  int get severityRank {
+    return switch (this) {
+      SevenTimerPrecipitationType.none => 0,
+      SevenTimerPrecipitationType.rain => 1,
+      SevenTimerPrecipitationType.snow => 2,
+      SevenTimerPrecipitationType.freezingRain => 3,
+      SevenTimerPrecipitationType.icePellets => 4,
     };
   }
 }
@@ -370,6 +383,40 @@ extension SevenTimerWeatherCodeMapper on SevenTimerWeatherCode {
       SevenTimerWeatherCode.unknown => WeatherType.cloudy,
     };
   }
+
+  int get severityRank {
+    return switch (this) {
+      SevenTimerWeatherCode.thunderstormDay ||
+      SevenTimerWeatherCode.thunderstormNight ||
+      SevenTimerWeatherCode.thunderRainDay ||
+      SevenTimerWeatherCode.thunderRainNight => 6,
+      SevenTimerWeatherCode.lightRainDay ||
+      SevenTimerWeatherCode.lightRainNight ||
+      SevenTimerWeatherCode.occasionalShowerDay ||
+      SevenTimerWeatherCode.occasionalShowerNight ||
+      SevenTimerWeatherCode.isolatedShowerDay ||
+      SevenTimerWeatherCode.isolatedShowerNight ||
+      SevenTimerWeatherCode.rainDay ||
+      SevenTimerWeatherCode.rainNight => 5,
+      SevenTimerWeatherCode.lightSnowDay ||
+      SevenTimerWeatherCode.lightSnowNight ||
+      SevenTimerWeatherCode.snowDay ||
+      SevenTimerWeatherCode.snowNight ||
+      SevenTimerWeatherCode.rainSnowDay ||
+      SevenTimerWeatherCode.rainSnowNight => 4,
+      SevenTimerWeatherCode.cloudyDay ||
+      SevenTimerWeatherCode.cloudyNight ||
+      SevenTimerWeatherCode.mostlyCloudyDay ||
+      SevenTimerWeatherCode.mostlyCloudyNight => 3,
+      SevenTimerWeatherCode.partlyCloudyDay ||
+      SevenTimerWeatherCode.partlyCloudyNight ||
+      SevenTimerWeatherCode.humidDay ||
+      SevenTimerWeatherCode.humidNight => 2,
+      SevenTimerWeatherCode.clearDay ||
+      SevenTimerWeatherCode.clearNight => 1,
+      SevenTimerWeatherCode.unknown => 0,
+    };
+  }
 }
 
 String weekdayLabel(DateTime date) {
@@ -383,6 +430,68 @@ String weekdayLabel(DateTime date) {
     DateTime.sunday => '周日',
     _ => '今天',
   };
+}
+
+String hourLabel(DateTime time) {
+  return '${time.hour.toString().padLeft(2, '0')}:00';
+}
+
+class SevenTimerForecastSlot {
+  const SevenTimerForecastSlot({
+    required this.at,
+    required this.weatherType,
+    required this.temperature,
+    required this.cloudCover,
+    required this.relativeHumidity,
+    required this.windDirection,
+    required this.windSpeedLevel,
+    required this.precipitationType,
+    required this.precipitationAmount,
+    required this.liftedIndex,
+  });
+
+  final DateTime at;
+  final SevenTimerWeatherCode weatherType;
+  final int temperature;
+  final int? cloudCover;
+  final int? relativeHumidity;
+  final String windDirection;
+  final int? windSpeedLevel;
+  final SevenTimerPrecipitationType precipitationType;
+  final int? precipitationAmount;
+  final int? liftedIndex;
+
+  String get humidityLabel =>
+      relativeHumidity == null ? '--' : '$relativeHumidity%';
+
+  String get cloudCoverLabel => cloudCover == null ? '--' : '$cloudCover%';
+
+  String get windSpeedLabel =>
+      windSpeedLevel == null ? '风速未知' : '$windSpeedLevel级风';
+
+  String get timeLabel => hourLabel(at);
+
+  /// 根据当前温度、湿度和风速做轻量估算，给首页卡片一个更接近体感的数字。
+  int get apparentTemperature {
+    final humidityOffset = relativeHumidity == null
+        ? 0
+        : ((relativeHumidity! - 60) / 12).round();
+    final windOffset = windSpeedLevel == null
+        ? 0
+        : ((windSpeedLevel! - 2) / 3).floor();
+    return temperature + humidityOffset - windOffset;
+  }
+
+  String buildSummary() {
+    final parts = <String>[
+      if (cloudCover != null) '云量$cloudCover%' else weatherType.label,
+      '风向$windDirection',
+      windSpeedLabel,
+      precipitationType.label,
+    ];
+
+    return parts.where((item) => item.isNotEmpty).join(' · ');
+  }
 }
 
 class SevenTimerDailyForecast {
@@ -422,7 +531,7 @@ class SevenTimerDailyForecast {
 
   String get dateLabel => '${date.month}月${date.day}日';
 
-  /// 7timer civillight 没有直接给体感温度，这里用湿度和风力做轻量估算，方便 UI 给用户直观反馈。
+  /// 日级卡片继续沿用体感估算，便于和首页卡片保持同一套展示口径。
   int get apparentTemperature {
     final humidityOffset = relativeHumidity == null
         ? 0

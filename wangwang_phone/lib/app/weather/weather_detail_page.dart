@@ -125,7 +125,7 @@ class WeatherDetailPage extends StatelessWidget {
                           const SizedBox(height: 18),
                           const SectionTitle(
                             title: '未来7天',
-                            subtitle: '左右滑动查看每日变化',
+                            subtitle: '基于 3 小时预报聚合后的每日变化',
                           ),
                           const SizedBox(height: 12),
                           SizedBox(
@@ -165,7 +165,7 @@ class WeatherDetailPage extends StatelessWidget {
                           const SizedBox(height: 18),
                           const SectionTitle(
                             title: '今日细节',
-                            subtitle: '基于 7timer 每日预报做展示',
+                            subtitle: '基于 7Timer Civil 实时预报展示',
                           ),
                           const SizedBox(height: 12),
                           _WeatherMetricGrid(
@@ -592,7 +592,7 @@ class _TemperatureTrendCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '用 7 日平均温度绘制趋势线，便于快速判断升温和降温。',
+            '用未来 7 天的日聚合温度绘制趋势线，便于快速判断升温和降温。',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: palette.secondaryText,
               height: 1.5,
