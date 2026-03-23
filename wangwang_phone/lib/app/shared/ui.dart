@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 class HomePalette {
@@ -31,12 +29,12 @@ class HomePalette {
           Color(0xFF171126),
           Color(0xFF0E1322),
         ],
-        panelBackground: Color(0x1FFFFFFF),
-        borderColor: Color(0x2EFFFFFF),
+        panelBackground: Color(0xFF172133),
+        borderColor: Color(0xFF25344A),
         primaryText: Colors.white,
         secondaryText: Color(0xCCFFFFFF),
-        iconSurface: Color(0x19FFFFFF),
-        chipBackground: Color(0x14FFFFFF),
+        iconSurface: Color(0xFF1E2A3E),
+        chipBackground: Color(0xFF213149),
       );
     }
 
@@ -46,12 +44,12 @@ class HomePalette {
         Color(0xFFF7F2FB),
         Color(0xFFEFF4FF),
       ],
-      panelBackground: Color(0xCCFFFFFF),
-      borderColor: Color(0x1F6B4B73),
+      panelBackground: Color(0xFFFFFFFF),
+      borderColor: Color(0xFFE5E7EB),
       primaryText: Color(0xFF2D2238),
       secondaryText: Color(0xFF6A6078),
-      iconSurface: Color(0xE8FFFFFF),
-      chipBackground: Color(0xF5FFFFFF),
+      iconSurface: Color(0xFFFFFFFF),
+      chipBackground: Color(0xFFF3F4F6),
     );
   }
 }
@@ -72,20 +70,21 @@ class FrostPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: palette.panelBackground,
-            borderRadius: BorderRadius.circular(borderRadius),
-            border: Border.all(color: palette.borderColor),
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: palette.panelBackground,
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(color: palette.borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
           ),
-          child: child,
-        ),
+        ],
       ),
+      child: child,
     );
   }
 }

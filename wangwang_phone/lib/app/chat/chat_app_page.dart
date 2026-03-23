@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import '../shared/ui.dart';
@@ -11,6 +9,18 @@ import 'chat_moment_composer_page.dart';
 import 'chat_models.dart';
 
 const double _chatBottomNavigationHeight = 74;
+const List<Color> _bubbleColorOptions = [
+  Color(0xFF0A84FF),
+  Color(0xFF30B0C7),
+  Color(0xFF3BB273),
+  Color(0xFF7C6CF2),
+  Color(0xFFFF6B8D),
+  Color(0xFFFF8A3D),
+  Color(0xFFE056FD),
+  Color(0xFF4C6FFF),
+  Color(0xFF5C677D),
+  Color(0xFFE9EAEE),
+];
 
 class ChatAppPage extends StatefulWidget {
   const ChatAppPage({super.key, required this.controller});
@@ -33,67 +43,40 @@ class _ChatAppPageState extends State<ChatAppPage> {
 
         return Scaffold(
           key: const Key('chat_app_page'),
+          backgroundColor: palette.pageBackground,
           extendBody: true,
           body: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: palette.backgroundGradient,
-              ),
-            ),
-            child: Stack(
-              children: [
-                Positioned(
-                  top: -80,
-                  left: -40,
-                  child: AccentOrb(
-                    color: palette.accentColor,
-                    size: 220,
-                    opacity: 0.14,
+            color: palette.pageBackground,
+            child: SafeArea(
+              child: Column(
+                children: [
+                  _ChatShellHeader(
+                    title: tab.label,
+                    subtitle: tab.subtitle,
+                    onBack: () {
+                      Navigator.of(context).maybePop();
+                    },
                   ),
-                ),
-                Positioned(
-                  top: 60,
-                  right: -30,
-                  child: AccentOrb(
-                    color: palette.secondaryAccentColor,
-                    size: 180,
-                    opacity: 0.12,
-                  ),
-                ),
-                SafeArea(
-                  child: Column(
-                    children: [
-                      _ChatShellHeader(
-                        title: tab.label,
-                        subtitle: tab.subtitle,
-                        onBack: () {
-                          Navigator.of(context).maybePop();
-                        },
+                  Expanded(
+                    child: Padding(
+                      // 贴边底栏改为沉浸式后，需要给内容区预留固定高度，
+                      // 否则最后一张卡片会被底部导航覆盖。
+                      padding: const EdgeInsets.only(
+                        bottom: _chatBottomNavigationHeight,
                       ),
-                      Expanded(
-                        child: Padding(
-                          // 贴边底栏改为沉浸式后，需要给内容区预留固定高度，
-                          // 否则最后一张卡片会被底部导航覆盖。
-                          padding: const EdgeInsets.only(
-                            bottom: _chatBottomNavigationHeight,
-                          ),
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 220),
-                            switchInCurve: Curves.easeOutCubic,
-                            switchOutCurve: Curves.easeInCubic,
-                            child: KeyedSubtree(
-                              key: ValueKey(tab),
-                              child: _buildTabBody(tab),
-                            ),
-                          ),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        child: KeyedSubtree(
+                          key: ValueKey(tab),
+                          child: _buildTabBody(tab),
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           bottomNavigationBar: _ChatBottomNavigationBar(
@@ -211,56 +194,53 @@ class _ChatBottomNavigationBar extends StatelessWidget {
             : const Color(0x121E2A24);
 
     return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          key: const Key('chat_bottom_navigation_shell'),
-          decoration: BoxDecoration(
-            color: palette.navigationSurface,
-            border: Border(top: BorderSide(color: borderColor)),
-          ),
-          padding: EdgeInsets.only(bottom: bottomInset),
-          child: Theme(
-            data: Theme.of(context).copyWith(
-              navigationBarTheme: NavigationBarThemeData(
-                height: _chatBottomNavigationHeight,
-                backgroundColor: Colors.transparent,
-                indicatorColor: palette.navigationIndicator,
-                labelTextStyle: WidgetStateProperty.resolveWith((states) {
-                  final selected = states.contains(WidgetState.selected);
-                  return TextStyle(
-                    color: selected
-                        ? palette.navigationSelectedText
-                        : palette.navigationUnselectedText,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  );
-                }),
-                iconTheme: WidgetStateProperty.resolveWith((states) {
-                  final selected = states.contains(WidgetState.selected);
-                  return IconThemeData(
-                    color: selected
-                        ? palette.navigationSelectedText
-                        : palette.navigationUnselectedText,
-                  );
-                }),
-              ),
-            ),
-            child: NavigationBar(
+      child: Container(
+        key: const Key('chat_bottom_navigation_shell'),
+        decoration: BoxDecoration(
+          color: palette.navigationSurface,
+          border: Border(top: BorderSide(color: borderColor)),
+        ),
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: Theme(
+          data: Theme.of(context).copyWith(
+            navigationBarTheme: NavigationBarThemeData(
+              height: _chatBottomNavigationHeight,
               backgroundColor: Colors.transparent,
-              elevation: 0,
-              shadowColor: Colors.transparent,
-              surfaceTintColor: Colors.transparent,
-              selectedIndex: ChatTab.values.indexOf(selectedTab),
-              onDestinationSelected: onDestinationSelected,
-              destinations: ChatTab.values
-                  .map(
-                    (tabItem) => NavigationDestination(
-                      icon: Icon(tabItem.icon),
-                      label: tabItem.label,
-                    ),
-                  )
-                  .toList(),
+              indicatorColor: palette.navigationIndicator,
+              labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                final selected = states.contains(WidgetState.selected);
+                return TextStyle(
+                  color: selected
+                      ? palette.navigationSelectedText
+                      : palette.navigationUnselectedText,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                );
+              }),
+              iconTheme: WidgetStateProperty.resolveWith((states) {
+                final selected = states.contains(WidgetState.selected);
+                return IconThemeData(
+                  color: selected
+                      ? palette.navigationSelectedText
+                      : palette.navigationUnselectedText,
+                );
+              }),
             ),
+          ),
+          child: NavigationBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            shadowColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            selectedIndex: ChatTab.values.indexOf(selectedTab),
+            onDestinationSelected: onDestinationSelected,
+            destinations: ChatTab.values
+                .map(
+                  (tabItem) => NavigationDestination(
+                    icon: Icon(tabItem.icon),
+                    label: tabItem.label,
+                  ),
+                )
+                .toList(),
           ),
         ),
       ),
@@ -314,7 +294,7 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
   @override
   void initState() {
     super.initState();
-    _inputController = TextEditingController();
+    _inputController = TextEditingController()..addListener(_handleInputChanged);
     _scrollController = ScrollController();
     widget.controller.addListener(_handleControllerChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -330,6 +310,7 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
   void dispose() {
     widget.controller.removeListener(_handleControllerChanged);
     widget.controller.closeConversation(widget.contact.id);
+    _inputController.removeListener(_handleInputChanged);
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -344,118 +325,183 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
       builder: (context, _) {
         final messages = widget.controller.messagesFor(widget.contact.id);
         final isTyping = widget.controller.isTyping(widget.contact.id);
+        final bubbleAppearance = widget.controller.bubbleAppearance;
+        final hasDraftText = _inputController.text.trim().isNotEmpty;
+        final lastUserMessageId = _findLastUserMessageId(messages);
+        final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
 
         return Scaffold(
+          backgroundColor: palette.pageBackground,
           body: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: palette.backgroundGradient,
-              ),
-            ),
+            color: palette.pageBackground,
             child: SafeArea(
+              bottom: false,
               child: Column(
                 children: [
-                  _ChatShellHeader(
-                    title: widget.contact.name,
-                    subtitle: widget.contact.statusLabel,
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
+                  Container(
+                    decoration: BoxDecoration(
+                      color: palette.surfaceColor,
+                      border: Border(
+                        bottom: BorderSide(color: palette.separatorColor),
+                      ),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                    child: Row(
                       children: [
-                        RoundActionButton(
+                        _ChatIconButton(
+                          icon: Icons.arrow_back_ios_new_rounded,
+                          onTap: () {
+                            Navigator.of(context).maybePop();
+                          },
+                        ),
+                        const SizedBox(width: 12),
+                        _Avatar(
+                          color: widget.contact.avatarColor,
+                          label: widget.contact.emoji,
+                          size: 40,
+                          shadowOpacity: 0,
+                          shadowBlurRadius: 0,
+                          shadowOffset: Offset.zero,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.contact.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      color: palette.primaryText,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                widget.contact.statusLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: palette.secondaryText),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _ChatIconButton(
+                          icon: Icons.color_lens_outlined,
+                          onTap: _openBubbleAppearanceSheet,
+                        ),
+                        const SizedBox(width: 8),
+                        _ChatIconButton(
                           icon: Icons.dataset_linked_rounded,
                           onTap: _openContextDebug,
                         ),
-                        const SizedBox(width: 8),
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: widget.contact.avatarColor.withValues(
-                              alpha: 0.16,
-                            ),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            widget.contact.emoji,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
                       ],
                     ),
-                    onBack: () {
-                      Navigator.of(context).maybePop();
-                    },
                   ),
                   Expanded(
                     child: ListView.builder(
                       key: const Key('chat_message_list'),
                       controller: _scrollController,
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
                       itemCount: messages.length + (isTyping ? 1 : 0),
                       itemBuilder: (context, index) {
                         if (index >= messages.length) {
-                          return _TypingBubble(contact: widget.contact);
+                          return _TypingBubble(
+                            contact: widget.contact,
+                            bubbleAppearance: bubbleAppearance,
+                          );
                         }
 
                         final message = messages[index];
+                        final previousMessage =
+                            index > 0 ? messages[index - 1] : null;
                         return _ChatMessageBubble(
                           controller: widget.controller,
                           message: message,
-                          contact: widget.contact,
+                          bubbleAppearance: bubbleAppearance,
+                          showDateChip:
+                              previousMessage == null ||
+                              !_isSameMessageDay(
+                                previousMessage.sentAt,
+                                message.sentAt,
+                              ),
+                          showReadLabel:
+                              message.sender == ChatMessageSender.user &&
+                              message.id == lastUserMessageId,
                         );
                       },
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                    child: FrostPanel(
-                      padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-                      borderRadius: 28,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              key: const Key('chat_input_field'),
-                              controller: _inputController,
-                              minLines: 1,
-                              maxLines: 4,
-                              textInputAction: TextInputAction.send,
-                              decoration: InputDecoration(
-                                hintText: '给 ${widget.contact.name} 发消息...',
-                                border: InputBorder.none,
-                                isCollapsed: true,
-                                hintStyle: TextStyle(
+                  Container(
+                    decoration: BoxDecoration(
+                      color: palette.surfaceColor,
+                      border: Border(
+                        top: BorderSide(color: palette.separatorColor),
+                      ),
+                    ),
+                    padding: EdgeInsets.fromLTRB(12, 8, 12, bottomInset + 10),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            decoration: BoxDecoration(
+                              color: palette.inputSurface,
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(color: palette.inputBorderColor),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.mood_rounded,
+                                  size: 20,
                                   color: palette.secondaryText,
                                 ),
-                              ),
-                              onSubmitted: (_) => _handleSend(),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: TextField(
+                                    key: const Key('chat_input_field'),
+                                    controller: _inputController,
+                                    minLines: 1,
+                                    maxLines: 4,
+                                    textInputAction: TextInputAction.send,
+                                    decoration: InputDecoration(
+                                      hintText: 'iMessage 风格聊一聊...',
+                                      border: InputBorder.none,
+                                      isCollapsed: true,
+                                      hintStyle: TextStyle(
+                                        color: palette.secondaryText,
+                                      ),
+                                    ),
+                                    onSubmitted: (_) => _handleSend(),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          FilledButton(
-                            key: const Key('chat_send_button'),
-                            onPressed: _handleSend,
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              backgroundColor: palette.sendButtonColor,
-                            ),
-                            child: const Icon(Icons.send_rounded, size: 18),
+                        ),
+                        const SizedBox(width: 10),
+                        FilledButton(
+                          key: const Key('chat_send_button'),
+                          onPressed: _handleSend,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(46, 46),
+                            padding: EdgeInsets.zero,
+                            shape: const CircleBorder(),
+                            backgroundColor: palette.sendButtonColor,
                           ),
-                        ],
-                      ),
+                          child: Icon(
+                            hasDraftText
+                                ? Icons.arrow_upward_rounded
+                                : Icons.mic_rounded,
+                            size: 20,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -469,6 +515,13 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
 
   void _handleControllerChanged() {
     _scrollToBottomLater();
+  }
+
+  void _handleInputChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 
   Future<void> _handleSend() async {
@@ -507,6 +560,116 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
       context,
     ).push(_buildRoute(ChatContextDebugPage(bundle: bundle)));
   }
+
+  Future<void> _openBubbleAppearanceSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) {
+        return AnimatedBuilder(
+          animation: widget.controller,
+          builder: (context, _) {
+            final palette = ChatPalette.of(context);
+            final appearance = widget.controller.bubbleAppearance;
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: palette.surfaceColor,
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: palette.separatorColor),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 42,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: palette.separatorColor,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        '聊天气泡',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '预设一键切换，下面也能单独改你的气泡和对方气泡颜色。',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: palette.secondaryText,
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: widget.controller.bubblePresets.map((preset) {
+                          return _BubblePresetChip(
+                            preset: preset,
+                            selected:
+                                !appearance.isCustom &&
+                                appearance.presetId == preset.id,
+                            onTap: () {
+                              widget.controller.applyBubblePreset(preset.id);
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 18),
+                      _BubbleColorPicker(
+                        title: '我的气泡',
+                        selectedColor: appearance.userBubbleColor,
+                        onColorSelected: (color) {
+                          widget.controller.updateCustomBubbleColors(
+                            userBubbleColor: color,
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      _BubbleColorPicker(
+                        title: '对方气泡',
+                        selectedColor: appearance.peerBubbleColor,
+                        onColorSelected: (color) {
+                          widget.controller.updateCustomBubbleColors(
+                            peerBubbleColor: color,
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 18),
+                      _BubblePreviewCard(appearance: appearance),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String? _findLastUserMessageId(List<ChatMessage> messages) {
+    for (var index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].sender == ChatMessageSender.user) {
+        return messages[index].id;
+      }
+    }
+    return null;
+  }
 }
 
 class ContactDetailPage extends StatelessWidget {
@@ -524,14 +687,9 @@ class ContactDetailPage extends StatelessWidget {
     final palette = ChatPalette.of(context);
 
     return Scaffold(
+      backgroundColor: palette.pageBackground,
       body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: palette.backgroundGradient,
-          ),
-        ),
+        color: palette.pageBackground,
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -614,10 +772,9 @@ class AccountSettingsPage extends StatelessWidget {
     final palette = ChatPalette.of(context);
 
     return Scaffold(
+      backgroundColor: palette.pageBackground,
       body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(colors: palette.backgroundGradient),
-        ),
+        color: palette.pageBackground,
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -1156,10 +1313,10 @@ class _ChatShellHeader extends StatelessWidget {
     final palette = ChatPalette.of(context);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       child: Row(
         children: [
-          RoundActionButton(
+          _ChatIconButton(
             icon: Icons.arrow_back_ios_new_rounded,
             onTap: onBack,
           ),
@@ -1192,16 +1349,51 @@ class _ChatShellHeader extends StatelessWidget {
   }
 }
 
+class _ChatIconButton extends StatelessWidget {
+  const _ChatIconButton({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: palette.elevatedSurface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: palette.separatorColor),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 18, color: palette.primaryText),
+        ),
+      ),
+    );
+  }
+}
+
 class _ChatMessageBubble extends StatelessWidget {
   const _ChatMessageBubble({
     required this.controller,
     required this.message,
-    required this.contact,
+    required this.bubbleAppearance,
+    required this.showDateChip,
+    required this.showReadLabel,
   });
 
   final ChatAppController controller;
   final ChatMessage message;
-  final ChatContact contact;
+  final ChatBubbleAppearance bubbleAppearance;
+  final bool showDateChip;
+  final bool showReadLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -1210,50 +1402,58 @@ class _ChatMessageBubble extends StatelessWidget {
     final body = message.body;
 
     if (body is ActionMessageBody) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            decoration: BoxDecoration(
-              color: palette.navigationSurface,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              body.text,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: palette.secondaryText,
-                fontWeight: FontWeight.w600,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        mainAxisAlignment: isUser
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
+      return Column(
         children: [
-          if (!isUser) ...[
-            _Avatar(color: contact.avatarColor, label: contact.emoji, size: 34),
-            const SizedBox(width: 8),
-          ],
-          Flexible(
-            child: _MessageBodyCard(
-              palette: palette,
-              isUser: isUser,
-              message: message,
-              controller: controller,
+          if (showDateChip) _ConversationDateChip(time: message.sentAt),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: palette.dateChipColor,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  body.text,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: palette.dateChipTextColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             ),
           ),
         ],
-      ),
+      );
+    }
+
+    return Column(
+      children: [
+        if (showDateChip) _ConversationDateChip(time: message.sentAt),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            mainAxisAlignment: isUser
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Flexible(
+                child: _MessageBodyCard(
+                  palette: palette,
+                  bubbleAppearance: bubbleAppearance,
+                  isUser: isUser,
+                  message: message,
+                  controller: controller,
+                  showReadLabel: showReadLabel,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1261,37 +1461,48 @@ class _ChatMessageBubble extends StatelessWidget {
 class _MessageBodyCard extends StatelessWidget {
   const _MessageBodyCard({
     required this.palette,
+    required this.bubbleAppearance,
     required this.isUser,
     required this.message,
     required this.controller,
+    required this.showReadLabel,
   });
 
   final ChatPalette palette;
+  final ChatBubbleAppearance bubbleAppearance;
   final bool isUser;
   final ChatMessage message;
   final ChatAppController controller;
+  final bool showReadLabel;
 
   @override
   Widget build(BuildContext context) {
     final body = message.body;
+    final bubbleColor = isUser
+        ? bubbleAppearance.userBubbleColor
+        : bubbleAppearance.peerBubbleColor;
+    final textColor = _bubbleTextColor(bubbleColor);
 
     if (body is EmojiMessageBody) {
       return _MessageBubbleShell(
         palette: palette,
+        bubbleAppearance: bubbleAppearance,
         isUser: isUser,
+        message: message,
+        showReadLabel: showReadLabel,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(body.emoji, style: const TextStyle(fontSize: 34)),
+            Text(body.emoji, style: const TextStyle(fontSize: 32)),
             const SizedBox(height: 8),
             Text(
               body.description,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: isUser ? Colors.white : palette.primaryText,
-                height: 1.55,
+                color: textColor,
+                height: 1.45,
               ),
             ),
-          ],
+          ),
         ),
       );
     }
@@ -1299,23 +1510,26 @@ class _MessageBodyCard extends StatelessWidget {
     if (body is ImageMessageBody) {
       return _MessageBubbleShell(
         palette: palette,
+        bubbleAppearance: bubbleAppearance,
         isUser: isUser,
+        message: message,
+        showReadLabel: showReadLabel,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
               width: double.infinity,
-              height: 132,
+              height: 126,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    palette.accentColor.withValues(alpha: 0.75),
+                    palette.accentColor.withValues(alpha: 0.82),
                     palette.secondaryAccentColor.withValues(alpha: 0.92),
                   ],
                 ),
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(14),
               ),
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(15),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -1326,7 +1540,7 @@ class _MessageBodyCard extends StatelessWidget {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
+                      color: Colors.white.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
@@ -1352,8 +1566,8 @@ class _MessageBodyCard extends StatelessWidget {
             Text(
               body.description,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: isUser ? Colors.white : palette.primaryText,
-                height: 1.55,
+                color: textColor,
+                height: 1.5,
               ),
             ),
           ],
@@ -1364,9 +1578,11 @@ class _MessageBodyCard extends StatelessWidget {
     if (body is MoneyCardMessageBody) {
       return _MoneyMessageCard(
         palette: palette,
+        bubbleAppearance: bubbleAppearance,
         body: body,
         message: message,
         controller: controller,
+        showReadLabel: showReadLabel,
       );
     }
 
@@ -1378,12 +1594,15 @@ class _MessageBodyCard extends StatelessWidget {
 
     return _MessageBubbleShell(
       palette: palette,
+      bubbleAppearance: bubbleAppearance,
       isUser: isUser,
+      message: message,
+      showReadLabel: showReadLabel,
       child: Text(
         text,
         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-          color: isUser ? Colors.white : palette.primaryText,
-          height: 1.55,
+          color: textColor,
+          height: 1.45,
         ),
       ),
     );
@@ -1393,31 +1612,88 @@ class _MessageBodyCard extends StatelessWidget {
 class _MessageBubbleShell extends StatelessWidget {
   const _MessageBubbleShell({
     required this.palette,
+    required this.bubbleAppearance,
     required this.isUser,
+    required this.message,
     required this.child,
+    this.showReadLabel = false,
   });
 
   final ChatPalette palette;
+  final ChatBubbleAppearance bubbleAppearance;
   final bool isUser;
+  final ChatMessage message;
   final Widget child;
+  final bool showReadLabel;
 
   @override
   Widget build(BuildContext context) {
+    final bubbleColor = isUser
+        ? bubbleAppearance.userBubbleColor
+        : bubbleAppearance.peerBubbleColor;
+    final textColor = _bubbleTextColor(bubbleColor);
+    final metaColor = isUser
+        ? Colors.white.withValues(alpha: 0.78)
+        : palette.messageMetaTextColor;
+
     return Container(
-      constraints: const BoxConstraints(maxWidth: 280),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      constraints: const BoxConstraints(maxWidth: 292),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
       decoration: BoxDecoration(
-        color: isUser ? palette.userBubble : palette.aiBubble,
-        borderRadius: BorderRadius.circular(22),
+        color: bubbleColor,
+        border: Border.all(
+          color: isUser ? Colors.transparent : palette.bubbleBorderColor,
+        ),
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(20),
+          topRight: const Radius.circular(20),
+          bottomLeft: Radius.circular(isUser ? 20 : 6),
+          bottomRight: Radius.circular(isUser ? 6 : 20),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
+            color: Colors.black.withValues(alpha: 0.035),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
-      child: child,
+      child: DefaultTextStyle.merge(
+        style: TextStyle(color: textColor),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            child,
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (showReadLabel)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Text(
+                        '已读',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: isUser ? textColor : palette.readLabelColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  Text(
+                    _formatMessageTime(message.sentAt),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: metaColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1425,15 +1701,19 @@ class _MessageBubbleShell extends StatelessWidget {
 class _MoneyMessageCard extends StatelessWidget {
   const _MoneyMessageCard({
     required this.palette,
+    required this.bubbleAppearance,
     required this.body,
     required this.message,
     required this.controller,
+    required this.showReadLabel,
   });
 
   final ChatPalette palette;
+  final ChatBubbleAppearance bubbleAppearance;
   final MoneyCardMessageBody body;
   final ChatMessage message;
   final ChatAppController controller;
+  final bool showReadLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -1444,7 +1724,10 @@ class _MoneyMessageCard extends StatelessWidget {
 
     return _MessageBubbleShell(
       palette: palette,
+      bubbleAppearance: bubbleAppearance,
       isUser: false,
+      message: message,
+      showReadLabel: showReadLabel,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1473,7 +1756,7 @@ class _MoneyMessageCard extends StatelessWidget {
                     Text(
                       body.title,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: palette.primaryText,
+                        color: _bubbleTextColor(bubbleAppearance.peerBubbleColor),
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -1495,8 +1778,8 @@ class _MoneyMessageCard extends StatelessWidget {
           Text(
             body.note,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: palette.primaryText,
-              height: 1.55,
+              color: _bubbleTextColor(bubbleAppearance.peerBubbleColor),
+              height: 1.45,
             ),
           ),
           if (body is RedPacketMessageBody) ...[
@@ -1504,7 +1787,7 @@ class _MoneyMessageCard extends StatelessWidget {
             Text(
               (body as RedPacketMessageBody).blessing,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: palette.secondaryText,
+                color: palette.messageMetaTextColor,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -1561,7 +1844,7 @@ class _MoneyMessageCard extends StatelessWidget {
                   Text(
                     body.status.label,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: palette.primaryText,
+                      color: _bubbleTextColor(bubbleAppearance.peerBubbleColor),
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -1575,9 +1858,52 @@ class _MoneyMessageCard extends StatelessWidget {
 }
 
 class _TypingBubble extends StatelessWidget {
-  const _TypingBubble({required this.contact});
+  const _TypingBubble({
+    required this.contact,
+    required this.bubbleAppearance,
+  });
 
   final ChatContact contact;
+  final ChatBubbleAppearance bubbleAppearance;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: bubbleAppearance.peerBubbleColor,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(20),
+              topRight: Radius.circular(20),
+              bottomLeft: Radius.circular(6),
+              bottomRight: Radius.circular(20),
+            ),
+            border: Border.all(color: palette.bubbleBorderColor),
+          ),
+          child: Text(
+            '${contact.name} 正在输入...',
+            key: const Key('chat_typing_indicator'),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: palette.secondaryText,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationDateChip extends StatelessWidget {
+  const _ConversationDateChip({required this.time});
+
+  final DateTime time;
 
   @override
   Widget build(BuildContext context) {
@@ -1585,26 +1911,231 @@ class _TypingBubble extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          _Avatar(color: contact.avatarColor, label: contact.emoji, size: 34),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: palette.aiBubble,
-              borderRadius: BorderRadius.circular(22),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: palette.dateChipColor,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            _formatConversationDate(time),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: palette.dateChipTextColor,
+              fontWeight: FontWeight.w700,
             ),
-            child: Text(
-              '${contact.name} 正在输入...',
-              key: const Key('chat_typing_indicator'),
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: palette.secondaryText,
-                fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BubblePresetChip extends StatelessWidget {
+  const _BubblePresetChip({
+    required this.preset,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final ChatBubblePreset preset;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Container(
+          width: 118,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: selected ? palette.threadPinnedSurface : palette.elevatedSurface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected ? palette.accentColor : palette.separatorColor,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _ColorDot(color: preset.peerBubbleColor),
+                  const SizedBox(width: 6),
+                  _ColorDot(color: preset.userBubbleColor),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                preset.label,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: palette.primaryText,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BubbleColorPicker extends StatelessWidget {
+  const _BubbleColorPicker({
+    required this.title,
+    required this.selectedColor,
+    required this.onColorSelected,
+  });
+
+  final String title;
+  final Color selectedColor;
+  final ValueChanged<Color> onColorSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: palette.primaryText,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: _bubbleColorOptions.map((color) {
+            final selected = color.value == selectedColor.value;
+            return GestureDetector(
+              onTap: () {
+                onColorSelected(color);
+              },
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: selected ? palette.primaryText : Colors.white,
+                    width: selected ? 2.4 : 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+}
+
+class _BubblePreviewCard extends StatelessWidget {
+  const _BubblePreviewCard({required this.appearance});
+
+  final ChatBubbleAppearance appearance;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: palette.pageBackground,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: palette.separatorColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '实时预览',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: palette.primaryText,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: appearance.peerBubbleColor,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  topRight: Radius.circular(20),
+                  bottomLeft: Radius.circular(6),
+                  bottomRight: Radius.circular(20),
+                ),
+                border: Border.all(color: palette.bubbleBorderColor),
+              ),
+              child: Text(
+                '这样读起来会更像 iMessage。',
+                style: TextStyle(color: _bubbleTextColor(appearance.peerBubbleColor)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: appearance.userBubbleColor,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  topRight: Radius.circular(20),
+                  bottomLeft: Radius.circular(20),
+                  bottomRight: Radius.circular(6),
+                ),
+              ),
+              child: Text(
+                '已读标签也会一起保留。',
+                style: TextStyle(color: _bubbleTextColor(appearance.userBubbleColor)),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ColorDot extends StatelessWidget {
+  const _ColorDot({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 1.2),
       ),
     );
   }
@@ -1985,11 +2516,15 @@ class _Avatar extends StatelessWidget {
 
 class ChatPalette {
   const ChatPalette({
+    required this.pageBackground,
     required this.backgroundGradient,
     required this.primaryText,
     required this.secondaryText,
     required this.accentColor,
     required this.secondaryAccentColor,
+    required this.surfaceColor,
+    required this.elevatedSurface,
+    required this.separatorColor,
     required this.navigationSurface,
     required this.navigationIndicator,
     required this.navigationSelectedText,
@@ -1997,17 +2532,28 @@ class ChatPalette {
     required this.threadSurface,
     required this.threadPinnedSurface,
     required this.threadDividerColor,
+    required this.inputSurface,
+    required this.inputBorderColor,
+    required this.dateChipColor,
+    required this.dateChipTextColor,
+    required this.messageMetaTextColor,
+    required this.readLabelColor,
+    required this.bubbleBorderColor,
     required this.userBubble,
     required this.aiBubble,
     required this.sendButtonColor,
     required this.unreadBadgeColor,
   });
 
+  final Color pageBackground;
   final List<Color> backgroundGradient;
   final Color primaryText;
   final Color secondaryText;
   final Color accentColor;
   final Color secondaryAccentColor;
+  final Color surfaceColor;
+  final Color elevatedSurface;
+  final Color separatorColor;
   final Color navigationSurface;
   final Color navigationIndicator;
   final Color navigationSelectedText;
@@ -2015,6 +2561,13 @@ class ChatPalette {
   final Color threadSurface;
   final Color threadPinnedSurface;
   final Color threadDividerColor;
+  final Color inputSurface;
+  final Color inputBorderColor;
+  final Color dateChipColor;
+  final Color dateChipTextColor;
+  final Color messageMetaTextColor;
+  final Color readLabelColor;
+  final Color bubbleBorderColor;
   final Color userBubble;
   final Color aiBubble;
   final Color sendButtonColor;
@@ -2024,50 +2577,72 @@ class ChatPalette {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     if (isDark) {
       return const ChatPalette(
+        pageBackground: Color(0xFF0F1115),
         backgroundGradient: [
-          Color(0xFF10221A),
-          Color(0xFF0E1714),
-          Color(0xFF09110E),
+          Color(0xFF0F1115),
+          Color(0xFF0F1115),
+          Color(0xFF0F1115),
         ],
         primaryText: Colors.white,
-        secondaryText: Color(0xC7FFFFFF),
-        accentColor: Color(0xFF77D992),
-        secondaryAccentColor: Color(0xFFFFB870),
-        navigationSurface: Color(0x2BFFFFFF),
-        navigationIndicator: Color(0x2477D992),
+        secondaryText: Color(0xFFABB5C7),
+        accentColor: Color(0xFF2481FF),
+        secondaryAccentColor: Color(0xFF7C6CF2),
+        surfaceColor: Color(0xFF161A21),
+        elevatedSurface: Color(0xFF1C212B),
+        separatorColor: Color(0xFF282E3A),
+        navigationSurface: Color(0xFF161A21),
+        navigationIndicator: Color(0x220A84FF),
         navigationSelectedText: Colors.white,
-        navigationUnselectedText: Color(0xBFFFFFFF),
-        threadSurface: Color(0x12FFFFFF),
-        threadPinnedSurface: Color(0x24313E37),
-        threadDividerColor: Color(0x1FFFFFFF),
-        userBubble: Color(0xFF2E8D57),
-        aiBubble: Color(0x18FFFFFF),
-        sendButtonColor: Color(0xFF2E8D57),
-        unreadBadgeColor: Color(0xFFFF6F6F),
+        navigationUnselectedText: Color(0xFF98A2B3),
+        threadSurface: Color(0xFF161A21),
+        threadPinnedSurface: Color(0xFF1A2433),
+        threadDividerColor: Color(0xFF263041),
+        inputSurface: Color(0xFF1D222C),
+        inputBorderColor: Color(0xFF2B3240),
+        dateChipColor: Color(0xFF2A303B),
+        dateChipTextColor: Color(0xFFD2D7E0),
+        messageMetaTextColor: Color(0xFFADB5C3),
+        readLabelColor: Color(0xFF78B4FF),
+        bubbleBorderColor: Color(0xFF2B3240),
+        userBubble: Color(0xFF2481FF),
+        aiBubble: Color(0xFF1F2732),
+        sendButtonColor: Color(0xFF2481FF),
+        unreadBadgeColor: Color(0xFFFF6B81),
       );
     }
 
     return const ChatPalette(
+      pageBackground: Color(0xFFF5F5F7),
       backgroundGradient: [
-        Color(0xFFF3FBF6),
-        Color(0xFFFFFAF2),
-        Color(0xFFF4F8FF),
+        Color(0xFFF5F5F7),
+        Color(0xFFF5F5F7),
+        Color(0xFFF5F5F7),
       ],
-      primaryText: Color(0xFF1E2A24),
-      secondaryText: Color(0xFF66736D),
-      accentColor: Color(0xFF56B26F),
-      secondaryAccentColor: Color(0xFFFFA25A),
-      navigationSurface: Color(0xEFFFFFFF),
-      navigationIndicator: Color(0x1E56B26F),
-      navigationSelectedText: Color(0xFF1E2A24),
-      navigationUnselectedText: Color(0xFF76847C),
-      threadSurface: Color(0xD9FFFFFF),
-      threadPinnedSurface: Color(0xFFF0F5F1),
-      threadDividerColor: Color(0x1466736D),
-      userBubble: Color(0xFF56B26F),
-      aiBubble: Color(0xFFFFFFFF),
-      sendButtonColor: Color(0xFF56B26F),
-      unreadBadgeColor: Color(0xFFFF6F6F),
+      primaryText: Color(0xFF111827),
+      secondaryText: Color(0xFF6B7280),
+      accentColor: Color(0xFF0A84FF),
+      secondaryAccentColor: Color(0xFF5E5CE6),
+      surfaceColor: Color(0xFFFFFFFF),
+      elevatedSurface: Color(0xFFFFFFFF),
+      separatorColor: Color(0xFFDDE1E7),
+      navigationSurface: Color(0xFFFFFFFF),
+      navigationIndicator: Color(0x1F0A84FF),
+      navigationSelectedText: Color(0xFF111827),
+      navigationUnselectedText: Color(0xFF7B8694),
+      threadSurface: Color(0xFFFFFFFF),
+      threadPinnedSurface: Color(0xFFEFF4FF),
+      threadDividerColor: Color(0xFFE4E7EC),
+      inputSurface: Color(0xFFF2F3F7),
+      inputBorderColor: Color(0xFFE0E4EA),
+      dateChipColor: Color(0xFFE9ECF2),
+      dateChipTextColor: Color(0xFF667085),
+      messageMetaTextColor: Color(0xFF7B8694),
+      readLabelColor: Color(0xFF0A84FF),
+      bubbleBorderColor: Color(0xFFE1E5EB),
+      userBubble: Color(0xFF0A84FF),
+      aiBubble: Color(0xFFE9EAEE),
+      sendButtonColor: Color(0xFF0A84FF),
+      unreadBadgeColor: Color(0xFFFF4D67),
     );
   }
 }
@@ -2082,6 +2657,30 @@ String _formatThreadTime(DateTime time) {
   return '${time.month}/${time.day}';
 }
 
+String _formatConversationDate(DateTime time) {
+  final now = DateTime.now();
+  if (now.year == time.year) {
+    return '${time.month}月${time.day}日';
+  }
+  return '${time.year}年${time.month}月${time.day}日';
+}
+
+String _formatMessageTime(DateTime time) {
+  return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+}
+
 String _formatMomentTime(DateTime time) {
   return '${time.month}月${time.day}日 ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+}
+
+bool _isSameMessageDay(DateTime left, DateTime right) {
+  return left.year == right.year &&
+      left.month == right.month &&
+      left.day == right.day;
+}
+
+Color _bubbleTextColor(Color bubbleColor) {
+  return bubbleColor.computeLuminance() > 0.62
+      ? const Color(0xFF111827)
+      : Colors.white;
 }

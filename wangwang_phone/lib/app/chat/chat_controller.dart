@@ -38,7 +38,10 @@ class ChatAppController extends ChangeNotifier {
       ],
       _contextAssembler = const ChatContextAssembler(),
       _summaryGenerator = const ChatSummaryGenerator(),
-      _summaryStore = summaryStore ?? buildDefaultChatSummaryStore();
+      _summaryStore = summaryStore ?? buildDefaultChatSummaryStore(),
+      _bubbleAppearance = ChatBubbleAppearance.fromPreset(
+        ChatBubblePreset.iMessageBlue,
+      );
 
   final List<ChatContact> _contacts;
   final Map<String, ChatThread> _threads;
@@ -57,6 +60,7 @@ class ChatAppController extends ChangeNotifier {
   final ChatSummaryStore _summaryStore;
   final Set<String> _typingContacts = <String>{};
   final Map<String, ChatContextBundle> _lastContextBundles = {};
+  ChatBubbleAppearance _bubbleAppearance;
 
   ChatTab _currentTab = ChatTab.chats;
   String? _activeConversationId;
@@ -67,6 +71,10 @@ class ChatAppController extends ChangeNotifier {
   UserProfile get profile => _profile;
 
   ChatContextConfig get contextConfig => _contextConfig;
+
+  ChatBubbleAppearance get bubbleAppearance => _bubbleAppearance;
+
+  List<ChatBubblePreset> get bubblePresets => ChatBubblePreset.presets;
 
   List<ChatEmojiEntry> get emojiCatalog =>
       List<ChatEmojiEntry>.unmodifiable(_emojiCatalog);
@@ -151,6 +159,31 @@ class ChatAppController extends ChangeNotifier {
   }
 
   bool isTyping(String contactId) => _typingContacts.contains(contactId);
+
+  /// 切换到预设气泡方案时，直接整体替换颜色，保证 iMessage 风格统一收口。
+  void applyBubblePreset(String presetId) {
+    final preset = ChatBubblePreset.presets.firstWhere(
+      (item) => item.id == presetId,
+      orElse: () => ChatBubblePreset.iMessageBlue,
+    );
+    _bubbleAppearance = ChatBubbleAppearance.fromPreset(preset);
+    notifyListeners();
+  }
+
+  /// 自定义颜色时保留当前另一侧气泡配色，只更新用户刚选中的那一项。
+  void updateCustomBubbleColors({
+    Color? userBubbleColor,
+    Color? peerBubbleColor,
+  }) {
+    _bubbleAppearance = _bubbleAppearance.copyWith(
+      presetId: 'custom',
+      label: '自定义',
+      isCustom: true,
+      userBubbleColor: userBubbleColor ?? _bubbleAppearance.userBubbleColor,
+      peerBubbleColor: peerBubbleColor ?? _bubbleAppearance.peerBubbleColor,
+    );
+    notifyListeners();
+  }
 
   void selectTab(ChatTab nextTab) {
     if (nextTab == _currentTab) {
@@ -901,4 +934,102 @@ class ChatAppController extends ChangeNotifier {
     _disposed = true;
     super.dispose();
   }
+}
+
+class ChatBubbleAppearance {
+  const ChatBubbleAppearance({
+    required this.presetId,
+    required this.label,
+    required this.userBubbleColor,
+    required this.peerBubbleColor,
+    this.isCustom = false,
+  });
+
+  final String presetId;
+  final String label;
+  final Color userBubbleColor;
+  final Color peerBubbleColor;
+  final bool isCustom;
+
+  factory ChatBubbleAppearance.fromPreset(ChatBubblePreset preset) {
+    return ChatBubbleAppearance(
+      presetId: preset.id,
+      label: preset.label,
+      userBubbleColor: preset.userBubbleColor,
+      peerBubbleColor: preset.peerBubbleColor,
+    );
+  }
+
+  ChatBubbleAppearance copyWith({
+    String? presetId,
+    String? label,
+    Color? userBubbleColor,
+    Color? peerBubbleColor,
+    bool? isCustom,
+  }) {
+    return ChatBubbleAppearance(
+      presetId: presetId ?? this.presetId,
+      label: label ?? this.label,
+      userBubbleColor: userBubbleColor ?? this.userBubbleColor,
+      peerBubbleColor: peerBubbleColor ?? this.peerBubbleColor,
+      isCustom: isCustom ?? this.isCustom,
+    );
+  }
+}
+
+class ChatBubblePreset {
+  const ChatBubblePreset({
+    required this.id,
+    required this.label,
+    required this.userBubbleColor,
+    required this.peerBubbleColor,
+  });
+
+  final String id;
+  final String label;
+  final Color userBubbleColor;
+  final Color peerBubbleColor;
+
+  static const iMessageBlue = ChatBubblePreset(
+    id: 'imessage_blue',
+    label: 'iMessage 蓝',
+    userBubbleColor: Color(0xFF0A84FF),
+    peerBubbleColor: Color(0xFFE9EAEE),
+  );
+
+  static const softRose = ChatBubblePreset(
+    id: 'soft_rose',
+    label: '奶油玫瑰',
+    userBubbleColor: Color(0xFFFF6B8D),
+    peerBubbleColor: Color(0xFFFBE7EC),
+  );
+
+  static const freshMint = ChatBubblePreset(
+    id: 'fresh_mint',
+    label: '薄荷牛奶',
+    userBubbleColor: Color(0xFF3BB273),
+    peerBubbleColor: Color(0xFFE7F5ED),
+  );
+
+  static const lavender = ChatBubblePreset(
+    id: 'lavender',
+    label: '浅雾薰衣草',
+    userBubbleColor: Color(0xFF7C6CF2),
+    peerBubbleColor: Color(0xFFECE9FF),
+  );
+
+  static const graphite = ChatBubblePreset(
+    id: 'graphite',
+    label: '冷调石墨',
+    userBubbleColor: Color(0xFF3E4C63),
+    peerBubbleColor: Color(0xFFE6EAF0),
+  );
+
+  static const presets = [
+    iMessageBlue,
+    softRose,
+    freshMint,
+    lavender,
+    graphite,
+  ];
 }
