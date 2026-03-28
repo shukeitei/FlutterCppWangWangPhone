@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,9 @@ import 'chat_context.dart';
 import 'chat_message_payloads.dart';
 import 'chat_models.dart';
 import 'chat_summary_store.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class ChatAppController extends ChangeNotifier {
   ChatAppController.seeded({ChatSummaryStore? summaryStore})
@@ -41,7 +45,59 @@ class ChatAppController extends ChangeNotifier {
       _summaryStore = summaryStore ?? buildDefaultChatSummaryStore(),
       _bubbleAppearance = ChatBubbleAppearance.fromPreset(
         ChatBubblePreset.iMessageBlue,
-      );
+      ) {
+    // 构造函数里只负责执行这两行指令
+    syncContactsFromBridge();
+  }
+  /// 把当前所有消息持久化到本地 JSON 文件
+  Future<void> _saveMessages() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/wangwang_messages.json');
+      final data = <String, dynamic>{};
+      for (final entry in _messages.entries) {
+        data[entry.key] = entry.value.map((m) {
+          final body = m.body;
+          return {
+            'id': m.id,
+            'contactId': m.contactId,
+            'sender': m.sender.name,
+            'text': body is WordMessageBody ? body.text : '',
+            'sentAt': m.sentAt.toIso8601String(),
+          };
+        }).toList();
+      }
+      await file.writeAsString(jsonEncode(data));
+    } catch (_) {}
+  }
+
+  /// 启动时从本地 JSON 文件恢复消息
+  Future<void> loadPersistedMessages() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/wangwang_messages.json');
+      if (!await file.exists()) return;
+      final raw = await file.readAsString();
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      for (final entry in data.entries) {
+        final contactId = entry.key;
+        if (!_messages.containsKey(contactId)) continue;
+        final msgs = (entry.value as List).map((m) {
+          return ChatMessage(
+            id: m['id'],
+            contactId: m['contactId'],
+            sender: m['sender'] == 'user'
+                ? ChatMessageSender.user
+                : ChatMessageSender.ai,
+            body: WordMessageBody(m['text'] ?? ''),
+            sentAt: DateTime.parse(m['sentAt']),
+          );
+        }).toList();
+        _messages[contactId] = msgs;
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
 
   final List<ChatContact> _contacts;
   final Map<String, ChatThread> _threads;
@@ -140,8 +196,7 @@ class ChatAppController extends ChangeNotifier {
 
   ChatContextBundle? lastContextBundleFor(String contactId) =>
       _lastContextBundles[contactId];
-
-  /// 启动时从本地恢复动态 summary，让上下文拼装在首次打开聊天时就能拿到上次保存的摘要。
+/// 启动时从本地恢复动态 summary，让上下文拼装在首次打开聊天时就能拿到上次保存的摘要。
   Future<void> loadPersistedSummaries() async {
     final storedSummaries = await _summaryStore.loadSummaries();
     if (storedSummaries.isEmpty) {
@@ -153,6 +208,68 @@ class ChatAppController extends ChangeNotifier {
       notifyListeners();
     }
   }
+  /// 启动时从桥接服务同步 ST 角色卡，自动替换联系人列表。
+Future<void> syncContactsFromBridge() async {
+  try {
+    final dio = Dio();
+    dio.options.connectTimeout = const Duration(seconds: 5);
+    dio.options.receiveTimeout = const Duration(seconds: 10);
+
+    final res = await dio.get('http://192.168.1.247:7700/characters');
+    final List<dynamic> list = res.data;
+
+    _contacts.clear();
+    _threads.clear();
+    _moments.clear();
+
+    final now = DateTime.now();
+    for (final item in list) {
+      final name = item['name'] as String? ?? '未知角色';
+      final signature = item['signature'] as String? ?? '来自酒馆的角色';
+      final firstMes = item['first_mes'] as String? ?? '你好，我是$name。';
+
+      final contactId = name
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9\u4e00-\u9fa5]+'), '_');
+
+      final contact = ChatContact(
+        id: contactId,
+        name: name,
+        signature: signature,
+        personaSummary: item['description'] as String? ?? '',
+        statusLabel: '在线',
+        avatarColor: _colorForContact(contactId),
+        emoji: _avatarLabelForName(name),
+      );
+
+      _contacts.add(contact);
+      _threads[contactId] = ChatThread(
+        contactId: contactId,
+        lastMessage: firstMes,
+        updatedAt: now,
+        unreadCount: 1,
+      );
+      // 只有新联系人才设置初始消息，已有对话的不覆盖
+if (!_messages.containsKey(contactId)) {
+  _messages[contactId] = [
+    ChatMessage(...)
+  ];
+}
+          id: '$contactId-${now.microsecondsSinceEpoch}',
+          contactId: contactId,
+          sender: ChatMessageSender.ai,
+          body: WordMessageBody(firstMes),
+          sentAt: now,
+        ),
+      ];
+    }
+
+    notifyListeners();
+    await loadPersistedMessages(); // 加这一行，在同步角色之后再恢复消息
+  } catch (e) {
+    // 桥接服务连不上就保留原来的联系人
+  }
+}
 
   List<ChatMessage> messagesFor(String contactId) {
     return List<ChatMessage>.unmodifiable(_messages[contactId] ?? const []);
@@ -395,56 +512,109 @@ class ChatAppController extends ChangeNotifier {
 
   /// 发送用户消息后，立即更新会话列表，再异步追加一条角色回复，模拟聊天链路闭环。
   Future<void> sendTextMessage({
-    required String contactId,
-    required String text,
-  }) async {
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) {
-      return;
-    }
+  required String contactId,
+  required String text,
+}) async {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return;
 
-    final now = DateTime.now();
-    _appendMessage(
+  final now = DateTime.now();
+  _appendMessage(
+    contactId: contactId,
+    message: ChatMessage(
+      id: '$contactId-${now.microsecondsSinceEpoch}',
       contactId: contactId,
-      message: ChatMessage(
-        id: '$contactId-${now.microsecondsSinceEpoch}',
-        contactId: contactId,
-        sender: ChatMessageSender.user,
-        body: WordMessageBody(trimmed),
-        sentAt: now,
-      ),
-      unreadCount: 0,
-    );
+      sender: ChatMessageSender.user,
+      body: WordMessageBody(trimmed),
+      sentAt: now,
+    ),
+    unreadCount: 0,
+  );
+  await _saveMessages(); // 加这行，用户发消息就立刻存一次
+  _typingContacts.add(contactId);
+  notifyListeners();
 
-    _typingContacts.add(contactId);
-    notifyListeners();
+  try {
+    final dio = Dio();
+    dio.options.connectTimeout = const Duration(seconds: 5);
+    dio.options.receiveTimeout = const Duration(seconds: 60);
 
-    buildContextBundle(contactId: contactId, latestUserInput: trimmed);
-
-    await Future<void>.delayed(const Duration(milliseconds: 850));
-    if (_disposed) {
-      return;
-    }
-
-    _typingContacts.remove(contactId);
-
+    // 第一步：从桥接服务拉角色人设
     final contact = contactById(contactId);
-    final replyPayloads = _buildAiReplyPayloads(
-      contact: contact,
-      userMessage: trimmed,
-    );
-    await ingestStructuredPayloads(contactId: contactId, payloads: replyPayloads);
-    final hasExplicitSummary = replyPayloads.any(
-      (payload) => payload['type']?.toString().toLowerCase() == 'summary',
-    );
-    if (!hasExplicitSummary) {
-      await _refreshDynamicSummary(contactId);
+    String systemPrompt = '你是一个AI角色，请自然地回复用户。';
+    try {
+      final charRes = await dio.get(
+        'http://192.168.1.247:7700/characters/${Uri.encodeComponent(contact.name)}',
+      );
+      final charData = charRes.data;
+      final desc = charData['description'] ?? '';
+      final personality = charData['personality'] ?? '';
+      final scenario = charData['scenario'] ?? '';
+      systemPrompt = [
+        if (desc.isNotEmpty) desc,
+        if (personality.isNotEmpty) '性格：$personality',
+        if (scenario.isNotEmpty) '场景：$scenario',
+      ].join('\n\n');
+    } catch (_) {
+      // 拉不到角色卡就用默认 prompt，不影响聊天
     }
-    buildContextBundle(contactId: contactId, latestUserInput: trimmed);
-  }
 
-  /// 根据角色设定和用户最后一句话拼出一条稳定可预测的回复，便于后续替换成真实 AI 接口。
-  List<Map<String, dynamic>> _buildAiReplyPayloads({
+    // 第二步：构建对话历史（最近10条）
+    final history = messagesFor(contactId)
+        .where((m) => m.body is WordMessageBody)
+        .toList();
+    final recentHistory = history.length > 100
+        ? history.sublist(history.length - 100)
+        : history;
+
+    final messages = <Map<String, dynamic>>[
+      {'role': 'system', 'content': systemPrompt},
+      for (final m in recentHistory)
+        {
+          'role': m.sender == ChatMessageSender.user ? 'user' : 'assistant',
+          'content': (m.body as WordMessageBody).text,
+        },
+    ];
+
+    // 第三步：发给 DeepSeek
+    final response = await dio.post(
+      'https://api.deepseek.com/v1/chat/completions',
+      options: Options(
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer sk-cabf1304e6df446e915ea6a0ab22e310',
+        },
+      ),
+      data: {
+        'model': 'deepseek-chat',
+        'messages': messages,
+        'max_tokens': 500,
+        'stream': false,
+      },
+    );
+
+    final String aiReplyText =
+        response.data['choices'][0]['message']['content'] as String;
+
+    final replyPayloads = [
+      {'type': 'word', 'text': aiReplyText}
+    ];
+    await ingestStructuredPayloads(
+        contactId: contactId, payloads: replyPayloads);
+        await _saveMessages();
+  } catch (e) {
+    final errorPayloads = [
+      {'type': 'word', 'text': '【信号中断】连不上酒馆啦！\n具体原因：$e'}
+    ];
+    await ingestStructuredPayloads(
+        contactId: contactId, payloads: errorPayloads);
+  } finally {
+    _typingContacts.remove(contactId);
+    notifyListeners();
+  }
+}
+
+    List<Map<String, dynamic>> _buildAiReplyPayloads({
     required ChatContact contact,
     required String userMessage,
   }) {
