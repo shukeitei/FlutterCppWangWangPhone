@@ -109,6 +109,9 @@ class ChatMessage {
     required this.sender,
     required this.body,
     required this.sentAt,
+    this.isHidden = false,
+    this.alternatives = const [],
+    this.activeAltIndex = 0,
   });
 
   final String id;
@@ -116,16 +119,31 @@ class ChatMessage {
   final ChatMessageSender sender;
   final ChatMessageBody body;
   final DateTime sentAt;
+  final bool isHidden;
+  final List<ChatMessageBody> alternatives; // 所有版本（含当前）
+  final int activeAltIndex; // 当前显示第几个
 
   String get previewText => body.previewText;
 
-  ChatMessage copyWith({ChatMessageBody? body}) {
+  /// 当前激活的消息体（如果有 alternatives 就用 activeAltIndex，否则用 body）
+  ChatMessageBody get activeBody =>
+      alternatives.isNotEmpty ? alternatives[activeAltIndex] : body;
+
+  ChatMessage copyWith({
+    ChatMessageBody? body,
+    bool? isHidden,
+    List<ChatMessageBody>? alternatives,
+    int? activeAltIndex,
+  }) {
     return ChatMessage(
       id: id,
       contactId: contactId,
       sender: sender,
       body: body ?? this.body,
       sentAt: sentAt,
+      isHidden: isHidden ?? this.isHidden,
+      alternatives: alternatives ?? this.alternatives,
+      activeAltIndex: activeAltIndex ?? this.activeAltIndex,
     );
   }
 }

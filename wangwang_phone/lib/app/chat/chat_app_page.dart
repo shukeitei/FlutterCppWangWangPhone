@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../shared/ui.dart';
 import 'chat_api_models.dart';
@@ -7,6 +8,7 @@ import 'chat_contact_editor_page.dart';
 import 'chat_controller.dart';
 import 'chat_message_payloads.dart';
 import 'chat_moment_composer_page.dart';
+import 'character_detail_page.dart';
 import 'chat_models.dart';
 import 'widgets/avatar_widget.dart';
 import 'widgets/preset_widgets.dart';
@@ -293,6 +295,33 @@ class ChatConversationPage extends StatefulWidget {
 class _ChatConversationPageState extends State<ChatConversationPage> {
   late final TextEditingController _inputController;
   late final ScrollController _scrollController;
+  bool _multiSelectMode = false;
+  final Set<String> _selectedIds = {};
+
+  void _enterMultiSelect({String? initialId}) {
+    setState(() {
+      _multiSelectMode = true;
+      _selectedIds.clear();
+      if (initialId != null) _selectedIds.add(initialId);
+    });
+  }
+
+  void _exitMultiSelect() {
+    setState(() {
+      _multiSelectMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelection(String messageId) {
+    setState(() {
+      if (_selectedIds.contains(messageId)) {
+        _selectedIds.remove(messageId);
+      } else {
+        _selectedIds.add(messageId);
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -341,7 +370,44 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
               bottom: false,
               child: Column(
                 children: [
-                  Container(
+                  if (_multiSelectMode)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: palette.surfaceColor,
+                        border: Border(
+                          bottom: BorderSide(color: palette.separatorColor),
+                        ),
+                      ),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Row(
+                        children: [
+                          TextButton(
+                            onPressed: _exitMultiSelect,
+                            child: Text(
+                              '取消',
+                              style: TextStyle(
+                                color: palette.secondaryText,
+                                fontSize: 15,
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '已选 ${_selectedIds.length} 条',
+                            style: TextStyle(
+                              color: palette.primaryText,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          const SizedBox(width: 48),
+                        ],
+                      ),
+                    )
+                  else
+                    Container(
                     decoration: BoxDecoration(
                       color: palette.surfaceColor,
                       border: Border(
@@ -358,14 +424,27 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                           },
                         ),
                         const SizedBox(width: 12),
-                        _Avatar(
-                          color: widget.contact.avatarColor,
-                          label: widget.contact.emoji,
-                          size: 40,
-                          shadowOpacity: 0,
-                          shadowBlurRadius: 0,
-                          shadowOffset: Offset.zero,
-                          avatarUrl: widget.contact.avatarUrl,
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => CharacterDetailPage(
+                                  controller: widget.controller,
+                                  contact: widget.contact,
+                                ),
+                              ),
+                            );
+                          },
+                          child: _Avatar(
+                            color: widget.contact.avatarColor,
+                            label: widget.contact.emoji,
+                            size: 40,
+                            shadowOpacity: 0,
+                            shadowBlurRadius: 0,
+                            shadowOffset: Offset.zero,
+                            avatarUrl: widget.contact.avatarUrl,
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -423,6 +502,9 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                         final message = messages[index];
                         final previousMessage =
                             index > 0 ? messages[index - 1] : null;
+                        final isLastAiMessage =
+                            message.sender == ChatMessageSender.ai &&
+                                index == messages.length - 1;
                         return _ChatMessageBubble(
                           controller: widget.controller,
                           message: message,
@@ -436,11 +518,80 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                           showReadLabel:
                               message.sender == ChatMessageSender.user &&
                               message.id == lastUserMessageId,
+                          multiSelectMode: _multiSelectMode,
+                          isSelected: _selectedIds.contains(message.id),
+                          onToggleSelect: () => _toggleSelection(message.id),
+                          onEnterMultiSelect: () =>
+                              _enterMultiSelect(initialId: message.id),
+                          isLastAiMessage: isLastAiMessage,
                         );
                       },
                     ),
                   ),
-                  Container(
+                  if (_multiSelectMode)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: palette.surfaceColor,
+                        border: Border(
+                          top: BorderSide(color: palette.separatorColor),
+                        ),
+                      ),
+                      padding: EdgeInsets.only(
+                        left: 16,
+                        right: 16,
+                        top: 10,
+                        bottom: bottomInset + 10,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _MultiSelectAction(
+                            icon: Icons.visibility_off_rounded,
+                            label: '隐藏',
+                            onTap: _selectedIds.isEmpty
+                                ? null
+                                : () {
+                                    widget.controller.batchToggleHideMessages(
+                                      contactId: widget.contact.id,
+                                      messageIds: _selectedIds.toSet(),
+                                      hide: true,
+                                    );
+                                    _exitMultiSelect();
+                                  },
+                          ),
+                          _MultiSelectAction(
+                            icon: Icons.visibility_rounded,
+                            label: '取消隐藏',
+                            onTap: _selectedIds.isEmpty
+                                ? null
+                                : () {
+                                    widget.controller.batchToggleHideMessages(
+                                      contactId: widget.contact.id,
+                                      messageIds: _selectedIds.toSet(),
+                                      hide: false,
+                                    );
+                                    _exitMultiSelect();
+                                  },
+                          ),
+                          _MultiSelectAction(
+                            icon: Icons.delete_outline_rounded,
+                            label: '删除',
+                            isDestructive: true,
+                            onTap: _selectedIds.isEmpty
+                                ? null
+                                : () {
+                                    widget.controller.batchDeleteMessages(
+                                      contactId: widget.contact.id,
+                                      messageIds: _selectedIds.toSet(),
+                                    );
+                                    _exitMultiSelect();
+                                  },
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Container(
                     decoration: BoxDecoration(
                       color: palette.surfaceColor,
                       border: Border(
@@ -2259,13 +2410,18 @@ class _ChatIconButton extends StatelessWidget {
   }
 }
 
-class _ChatMessageBubble extends StatelessWidget {
+class _ChatMessageBubble extends StatefulWidget {
   const _ChatMessageBubble({
     required this.controller,
     required this.message,
     required this.bubbleAppearance,
     required this.showDateChip,
     required this.showReadLabel,
+    this.multiSelectMode = false,
+    this.isSelected = false,
+    this.onToggleSelect,
+    this.onEnterMultiSelect,
+    this.isLastAiMessage = false,
   });
 
   final ChatAppController controller;
@@ -2273,17 +2429,43 @@ class _ChatMessageBubble extends StatelessWidget {
   final ChatBubbleAppearance bubbleAppearance;
   final bool showDateChip;
   final bool showReadLabel;
+  final bool multiSelectMode;
+  final bool isSelected;
+  final VoidCallback? onToggleSelect;
+  final VoidCallback? onEnterMultiSelect;
+  final bool isLastAiMessage;
+
+  @override
+  State<_ChatMessageBubble> createState() => _ChatMessageBubbleState();
+}
+
+class _ChatMessageBubbleState extends State<_ChatMessageBubble> {
+  bool _isEditing = false;
+  late TextEditingController _editController;
+
+  @override
+  void initState() {
+    super.initState();
+    _editController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _editController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final palette = ChatPalette.of(context);
-    final isUser = message.sender == ChatMessageSender.user;
-    final body = message.body;
+    final isUser = widget.message.sender == ChatMessageSender.user;
+    final body = widget.message.activeBody;
 
     if (body is ActionMessageBody) {
       return Column(
         children: [
-          if (showDateChip) _ConversationDateChip(time: message.sentAt),
+          if (widget.showDateChip)
+            _ConversationDateChip(time: widget.message.sentAt),
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Center(
@@ -2310,30 +2492,375 @@ class _ChatMessageBubble extends StatelessWidget {
 
     return Column(
       children: [
-        if (showDateChip) _ConversationDateChip(time: message.sentAt),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            mainAxisAlignment: isUser
-                ? MainAxisAlignment.end
-                : MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.end,
+        if (widget.showDateChip)
+          _ConversationDateChip(time: widget.message.sentAt),
+        GestureDetector(
+          onTap: widget.multiSelectMode ? widget.onToggleSelect : null,
+          onLongPress: widget.multiSelectMode
+              ? null
+              : () => _showMessageActionSheet(context),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _isEditing
+                ? _buildEditingBubble(context)
+                : Row(
+                    mainAxisAlignment: isUser
+                        ? MainAxisAlignment.end
+                        : MainAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      if (widget.multiSelectMode)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8, left: 4),
+                          child: Icon(
+                            widget.isSelected
+                                ? Icons.check_circle
+                                : Icons.radio_button_unchecked,
+                            color: widget.isSelected
+                                ? Colors.orangeAccent
+                                : Colors.white38,
+                            size: 22,
+                          ),
+                        ),
+                      Flexible(
+                        child: Opacity(
+                          opacity: widget.message.isHidden ? 0.4 : 1.0,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              if (widget.message.isHidden && !isUser)
+                                const Padding(
+                                  padding: EdgeInsets.only(right: 4),
+                                  child: Icon(
+                                    Icons.visibility_off,
+                                    size: 14,
+                                    color: Colors.white38,
+                                  ),
+                                ),
+                              Flexible(
+                                child: _MessageBodyCard(
+                                  palette: palette,
+                                  bubbleAppearance: widget.bubbleAppearance,
+                                  isUser: isUser,
+                                  message: widget.message,
+                                  controller: widget.controller,
+                                  showReadLabel: widget.showReadLabel,
+                                ),
+                              ),
+                              if (widget.message.isHidden && isUser)
+                                const Padding(
+                                  padding: EdgeInsets.only(left: 4),
+                                  child: Icon(
+                                    Icons.visibility_off,
+                                    size: 14,
+                                    color: Colors.white38,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+        if (widget.isLastAiMessage &&
+            !widget.multiSelectMode &&
+            !_isEditing)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 12, bottom: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.message.alternatives.length > 1) ...[
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: widget.message.activeAltIndex > 0
+                          ? () => widget.controller.switchAltVersion(
+                                contactId: widget.message.contactId,
+                                newIndex: widget.message.activeAltIndex - 1,
+                              )
+                          : null,
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          Icons.chevron_left_rounded,
+                          size: 18,
+                          color: widget.message.activeAltIndex > 0
+                              ? Colors.white54
+                              : Colors.white12,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${widget.message.activeAltIndex + 1}/${widget.message.alternatives.length}',
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 12,
+                      ),
+                    ),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: widget.message.activeAltIndex <
+                              widget.message.alternatives.length - 1
+                          ? () => widget.controller.switchAltVersion(
+                                contactId: widget.message.contactId,
+                                newIndex: widget.message.activeAltIndex + 1,
+                              )
+                          : null,
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          Icons.chevron_right_rounded,
+                          size: 18,
+                          color: widget.message.activeAltIndex <
+                                  widget.message.alternatives.length - 1
+                              ? Colors.white54
+                              : Colors.white12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      widget.controller.rerollLastReply(
+                        contactId: widget.message.contactId,
+                      );
+                    },
+                    child: const Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.refresh_rounded,
+                        size: 18,
+                        color: Colors.white38,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildEditingBubble(BuildContext context) {
+    final isUser = widget.message.sender == ChatMessageSender.user;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: isUser ? 48 : 12,
+        right: isUser ? 12 : 48,
+      ),
+      child: Column(
+        crossAxisAlignment:
+            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF2A2A3A),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.orangeAccent.withOpacity(0.6),
+                width: 1.5,
+              ),
+            ),
+            child: TextField(
+              controller: _editController,
+              autofocus: true,
+              maxLines: null,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                height: 1.45,
+              ),
+              decoration: const InputDecoration(
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                border: InputBorder.none,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Flexible(
-                child: _MessageBodyCard(
-                  palette: palette,
-                  bubbleAppearance: bubbleAppearance,
-                  isUser: isUser,
-                  message: message,
-                  controller: controller,
-                  showReadLabel: showReadLabel,
+              TextButton(
+                onPressed: () => setState(() => _isEditing = false),
+                child: const Text(
+                  '取消',
+                  style: TextStyle(color: Colors.white54),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () {
+                  final newText = _editController.text.trim();
+                  if (newText.isNotEmpty) {
+                    widget.controller.editMessage(
+                      contactId: widget.message.contactId,
+                      messageId: widget.message.id,
+                      newText: newText,
+                    );
+                  }
+                  setState(() => _isEditing = false);
+                },
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.orangeAccent.withOpacity(0.2),
+                ),
+                child: const Text(
+                  '确认',
+                  style: TextStyle(color: Colors.orangeAccent),
                 ),
               ),
             ],
           ),
-        ),
-      ],
+        ],
+      ),
     );
+  }
+
+  void _showMessageActionSheet(BuildContext context) {
+    final isHidden = widget.message.isHidden;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1E1E2A),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _ActionTile(
+                icon: Icons.copy_rounded,
+                label: '复制',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  final body = widget.message.activeBody;
+                  String text = '';
+                  if (body is WordMessageBody) {
+                    text = body.text;
+                  } else {
+                    text = widget.message.previewText;
+                  }
+                  Clipboard.setData(ClipboardData(text: text));
+                },
+              ),
+              _ActionTile(
+                icon: Icons.edit_rounded,
+                label: '改写',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _startEditing(context);
+                },
+              ),
+              _ActionTile(
+                icon: Icons.replay_rounded,
+                label: '回溯',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  showDialog(
+                    context: context,
+                    builder: (dCtx) => AlertDialog(
+                      backgroundColor: const Color(0xFF1E1E2A),
+                      title: const Text(
+                        '回溯确认',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      content: const Text(
+                        '将删除这条消息及之后的所有消息，不可恢复。',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dCtx),
+                          child: const Text('取消'),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(dCtx);
+                            widget.controller.rollbackToMessage(
+                              contactId: widget.message.contactId,
+                              messageId: widget.message.id,
+                            );
+                          },
+                          child: const Text(
+                            '确认回溯',
+                            style: TextStyle(color: Colors.redAccent),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              _ActionTile(
+                icon: Icons.delete_outline_rounded,
+                label: '删除',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  widget.controller.deleteMessage(
+                    contactId: widget.message.contactId,
+                    messageId: widget.message.id,
+                  );
+                },
+              ),
+              _ActionTile(
+                icon: isHidden
+                    ? Icons.visibility_rounded
+                    : Icons.visibility_off_rounded,
+                label: isHidden ? '取消隐藏' : '隐藏',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  widget.controller.toggleHideMessage(
+                    contactId: widget.message.contactId,
+                    messageId: widget.message.id,
+                  );
+                },
+              ),
+              _ActionTile(
+                icon: Icons.checklist_rounded,
+                label: '多选',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  widget.onEnterMultiSelect?.call();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _startEditing(BuildContext context) {
+    final body = widget.message.activeBody;
+    String currentText = '';
+    if (body is WordMessageBody) {
+      currentText = body.text;
+    } else {
+      currentText = widget.message.previewText;
+    }
+    _editController.text = currentText;
+    setState(() => _isEditing = true);
   }
 }
 
@@ -2356,7 +2883,7 @@ class _MessageBodyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final body = message.body;
+    final body = message.activeBody;
     final bubbleColor = isUser
         ? bubbleAppearance.userBubbleColor
         : bubbleAppearance.peerBubbleColor;
@@ -3591,4 +4118,75 @@ Color _bubbleTextColor(Color bubbleColor) {
   return bubbleColor.computeLuminance() > 0.62
       ? const Color(0xFF111827)
       : Colors.white;
+}
+
+class _MultiSelectAction extends StatelessWidget {
+  const _MultiSelectAction({
+    required this.icon,
+    required this.label,
+    this.isDestructive = false,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool isDestructive;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    final color = !enabled
+        ? Colors.white24
+        : isDestructive
+            ? Colors.redAccent
+            : Colors.white70;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 4),
+            Text(label, style: TextStyle(color: color, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, color: Colors.white70, size: 22),
+            const SizedBox(width: 16),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
