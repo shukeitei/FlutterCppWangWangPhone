@@ -44,6 +44,7 @@ class ChatContact {
     required this.statusLabel,
     required this.avatarColor,
     required this.emoji,
+    this.avatarUrl,
   });
 
   final String id;
@@ -53,6 +54,7 @@ class ChatContact {
   final String statusLabel;
   final Color avatarColor;
   final String emoji;
+  final String? avatarUrl;
 }
 
 class ChatContactDraft {

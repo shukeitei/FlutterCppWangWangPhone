@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../shared/ui.dart';
+import 'chat_api_models.dart';
 import 'chat_context_debug_page.dart';
 import 'chat_contact_editor_page.dart';
 import 'chat_controller.dart';
 import 'chat_message_payloads.dart';
 import 'chat_moment_composer_page.dart';
 import 'chat_models.dart';
+import 'widgets/avatar_widget.dart';
+import 'widgets/preset_widgets.dart';
 
 const double _chatBottomNavigationHeight = 74;
 const List<Color> _bubbleColorOptions = [
@@ -362,6 +365,7 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                           shadowOpacity: 0,
                           shadowBlurRadius: 0,
                           shadowOffset: Offset.zero,
+                          avatarUrl: widget.contact.avatarUrl,
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -391,8 +395,8 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                         ),
                         const SizedBox(width: 8),
                         _ChatIconButton(
-                          icon: Icons.color_lens_outlined,
-                          onTap: _openBubbleAppearanceSheet,
+                          icon: Icons.tune_rounded,
+                          onTap: _openChatSettingsSheet,
                         ),
                         const SizedBox(width: 8),
                         _ChatIconButton(
@@ -662,6 +666,20 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
     );
   }
 
+  Future<void> _openChatSettingsSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) {
+        return _ChatSettingsSheet(
+          controller: widget.controller,
+          contact: widget.contact,
+        );
+      },
+    );
+  }
+
   String? _findLastUserMessageId(List<ChatMessage> messages) {
     for (var index = messages.length - 1; index >= 0; index--) {
       if (messages[index].sender == ChatMessageSender.user) {
@@ -713,6 +731,7 @@ class ContactDetailPage extends StatelessWidget {
                           color: contact.avatarColor,
                           label: contact.emoji,
                           size: 64,
+                          avatarUrl: contact.avatarUrl,
                         ),
                         const SizedBox(width: 16),
                         Expanded(
@@ -958,7 +977,7 @@ class _ContactsTab extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _Avatar(color: contact.avatarColor, label: contact.emoji),
+                      _Avatar(color: contact.avatarColor, label: contact.emoji, avatarUrl: contact.avatarUrl),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
@@ -1091,6 +1110,7 @@ class _MomentsTab extends StatelessWidget {
                         color: contact.avatarColor,
                         label: contact.emoji,
                         size: 44,
+                        avatarUrl: contact.avatarUrl,
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -1167,6 +1187,861 @@ class _MomentsTab extends StatelessWidget {
           );
         }),
       ],
+    );
+  }
+}
+
+// ── Persona 辅助函数 ──
+
+String _personaPreview(String desc) {
+  if (desc.isEmpty) return '暂无描述';
+  final oneLine = desc.replaceAll('\n', ' ').trim();
+  return oneLine.length > 30 ? '${oneLine.substring(0, 30)}...' : oneLine;
+}
+
+String _personaSubtitle(Map<String, dynamic> persona) {
+  final name = persona['name'] as String? ?? '';
+  final desc = persona['description'] as String? ?? '';
+  final short = desc.length > 30 ? '${desc.substring(0, 30)}...' : desc;
+  if (short.isEmpty) return name;
+  return '$name — $short';
+}
+
+String _currentPersonaLabel(ChatAppController controller) {
+  if (controller.globalPersonaId.isEmpty) return '未选择';
+  for (final p in controller.personas) {
+    if (p['id'] == controller.globalPersonaId) {
+      return _personaSubtitle(p);
+    }
+  }
+  return '未选择';
+}
+
+void _showPersonaPicker(BuildContext context, ChatAppController controller) {
+  final palette = ChatPalette.of(context);
+
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (sheetContext) {
+      return AnimatedBuilder(
+        animation: controller,
+        builder: (ctx, _) {
+          final personas = controller.personas;
+          final selectedId = controller.globalPersonaId;
+
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+                ),
+                decoration: BoxDecoration(
+                  color: palette.surfaceColor,
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: palette.separatorColor),
+                ),
+                padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 42,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: palette.separatorColor,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      '选择用户身份',
+                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                        color: palette.primaryText,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: personas.length + 1,
+                        itemBuilder: (_, index) {
+                          if (index == 0) {
+                            return _PersonaListTile(
+                              title: '取消选择',
+                              subtitle: '不指定全局身份',
+                              selected: selectedId.isEmpty,
+                              palette: palette,
+                              onTap: () {
+                                controller.setGlobalPersona('');
+                                Navigator.of(sheetContext).pop();
+                              },
+                            );
+                          }
+                          final p = personas[index - 1];
+                          final id = p['id'] as String? ?? '';
+                          final name = p['name'] as String? ?? '未知';
+                          final desc = p['description'] as String? ?? '';
+                          return _PersonaListTile(
+                            title: name,
+                            subtitle: _personaPreview(desc),
+                            selected: id == selectedId,
+                            palette: palette,
+                            personaId: id,
+                            personaName: name,
+                            onTap: () {
+                              controller.setGlobalPersona(id);
+                              Navigator.of(sheetContext).pop();
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+class _PersonaListTile extends StatelessWidget {
+  const _PersonaListTile({
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.palette,
+    required this.onTap,
+    this.personaId,
+    this.personaName,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final ChatPalette palette;
+  final VoidCallback onTap;
+  final String? personaId;
+  final String? personaName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: selected ? palette.accentColor.withValues(alpha: 0.08) : null,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              if (personaId != null) ...[
+                PersonaAvatarWidget(
+                  size: 44,
+                  personaId: personaId!,
+                  bridgeHost: kBridgeHost,
+                  name: personaName ?? '?',
+                ),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: palette.primaryText,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                    if (subtitle.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: palette.secondaryText,
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (selected)
+                Icon(Icons.check_circle, color: palette.accentColor, size: 22),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── 聊天设置弹窗 ──
+
+class _ChatSettingsSheet extends StatefulWidget {
+  const _ChatSettingsSheet({
+    required this.controller,
+    required this.contact,
+  });
+
+  final ChatAppController controller;
+  final ChatContact contact;
+
+  @override
+  State<_ChatSettingsSheet> createState() => _ChatSettingsSheetState();
+}
+
+class _ChatSettingsSheetState extends State<_ChatSettingsSheet> {
+  Map<String, dynamic>? _resolvedPersona;
+  bool _showPersonaList = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadResolved();
+  }
+
+  Future<void> _loadResolved() async {
+    final result = await widget.controller.getResolvedPersona(widget.contact.name);
+    if (mounted) setState(() => _resolvedPersona = result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+    final personas = widget.controller.personas;
+    final resolvedName = _resolvedPersona?['name'] as String? ?? '加载中...';
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.75,
+          ),
+          decoration: BoxDecoration(
+            color: palette.surfaceColor,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: palette.separatorColor),
+          ),
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: palette.separatorColor,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Center(
+                  child: Text(
+                    '聊天设置',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: palette.primaryText,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => setState(() => _showPersonaList = !_showPersonaList),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: palette.accentColor.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(Icons.person_outline, color: palette.accentColor, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '用户身份',
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                color: palette.primaryText,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              resolvedName,
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: palette.secondaryText,
+                                height: 1.45,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        _showPersonaList ? Icons.expand_less : Icons.expand_more,
+                        color: palette.secondaryText,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_showPersonaList) ...[
+                const SizedBox(height: 8),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: personas.length + 1,
+                    itemBuilder: (_, index) {
+                      if (index == 0) {
+                        final globalLabel = _currentPersonaLabel(widget.controller);
+                        return _PersonaListTile(
+                          title: '跟随全局（当前：$globalLabel）',
+                          subtitle: '',
+                          selected: (_resolvedPersona?['id'] as String? ?? '').isEmpty,
+                          palette: palette,
+                          onTap: () async {
+                            await widget.controller.setChatPersona(widget.contact.name, '');
+                            await _loadResolved();
+                          },
+                        );
+                      }
+                      final p = personas[index - 1];
+                      final id = p['id'] as String? ?? '';
+                      final name = p['name'] as String? ?? '未知';
+                      final desc = p['description'] as String? ?? '';
+                      return _PersonaListTile(
+                        title: name,
+                        subtitle: _personaPreview(desc),
+                        selected: id == (_resolvedPersona?['id'] as String? ?? ''),
+                        palette: palette,
+                        personaId: id,
+                        personaName: name,
+                        onTap: () async {
+                          await widget.controller.setChatPersona(widget.contact.name, id);
+                          await _loadResolved();
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+              const Divider(height: 1, color: Color(0x18FFFFFF)),
+              ChatPresetSection(
+                controller: widget.controller,
+                contactId: widget.contact.id,
+              ),
+            ],
+          ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ApiConfigCard extends StatelessWidget {
+  const _ApiConfigCard({required this.controller});
+
+  final ChatAppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final provider = controller.currentApiProvider;
+        final configured = controller.isApiConfigured;
+        final subtitle = configured && provider != null
+            ? '${provider.label} · ${controller.apiModelId}'
+            : '未连接，点击配置';
+
+        return FrostPanel(
+          padding: EdgeInsets.zero,
+          borderRadius: 24,
+          child: InkWell(
+            onTap: () => _showApiConfigSheet(context),
+            borderRadius: BorderRadius.circular(24),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF7C6CF2).withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(
+                      Icons.api_rounded,
+                      color: Color(0xFF7C6CF2),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'API 接口',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: palette.primaryText,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: palette.secondaryText,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: palette.secondaryText,
+                    size: 24,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showApiConfigSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _ApiConfigSheet(controller: controller),
+    );
+  }
+}
+
+class _ApiConfigSheet extends StatefulWidget {
+  const _ApiConfigSheet({required this.controller});
+
+  final ChatAppController controller;
+
+  @override
+  State<_ApiConfigSheet> createState() => _ApiConfigSheetState();
+}
+
+class _ApiConfigSheetState extends State<_ApiConfigSheet> {
+  late final TextEditingController _keyController;
+  late final TextEditingController _customModelController;
+
+  @override
+  void initState() {
+    super.initState();
+    _keyController = TextEditingController(text: widget.controller.apiKey);
+    _customModelController = TextEditingController(
+      text: widget.controller.apiModelId,
+    );
+  }
+
+  @override
+  void dispose() {
+    _keyController.dispose();
+    _customModelController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+    final viewInsets = MediaQuery.of(context).viewInsets;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          child: Container(
+            decoration: BoxDecoration(
+              color: palette.surfaceColor,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: palette.separatorColor),
+            ),
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.85,
+            ),
+            child: AnimatedBuilder(
+              animation: widget.controller,
+              builder: (context, _) {
+                final currentProviderId = widget.controller.apiProviderId;
+                final currentProvider = widget.controller.currentApiProvider;
+                final currentModelId = widget.controller.apiModelId;
+
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 42,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: palette.separatorColor,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'API 接口设置',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+
+                      // ─── 服务商 ───
+                      _ApiSectionLabel(text: '服务商', palette: palette),
+                      const SizedBox(height: 10),
+                      ...kApiProviders.map((p) {
+                        final selected = p.id == currentProviderId;
+                        return _ApiRadioRow(
+                          label: p.label,
+                          selected: selected,
+                          palette: palette,
+                          onTap: () {
+                            widget.controller.setApiProvider(p.id);
+                          },
+                        );
+                      }),
+                      const SizedBox(height: 22),
+
+                      // ─── API Key ───
+                      _ApiSectionLabel(text: 'API Key', palette: palette),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _keyController,
+                        obscureText: true,
+                        style: TextStyle(color: palette.primaryText),
+                        decoration: InputDecoration(
+                          hintText: '请输入密钥',
+                          hintStyle: TextStyle(color: palette.secondaryText),
+                          filled: true,
+                          fillColor: palette.dateChipColor,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 14,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
+                          ),
+                          suffixIcon: _keyController.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  icon: Icon(
+                                    Icons.clear_rounded,
+                                    color: palette.secondaryText,
+                                    size: 20,
+                                  ),
+                                  onPressed: () {
+                                    setState(() => _keyController.clear());
+                                    widget.controller.setApiKey('');
+                                  },
+                                ),
+                        ),
+                        onChanged: (value) {
+                          widget.controller.setApiKey(value);
+                          setState(() {}); // refresh suffix clear button
+                        },
+                      ),
+                      const SizedBox(height: 22),
+
+                      // ─── 模型 ───
+                      if (currentProvider != null) ...[
+                        _ApiSectionLabel(text: '模型', palette: palette),
+                        const SizedBox(height: 10),
+                        if (currentProviderId == 'openrouter')
+                          TextField(
+                            controller: _customModelController,
+                            style: TextStyle(color: palette.primaryText),
+                            decoration: InputDecoration(
+                              hintText: '例如 anthropic/claude-3.5-sonnet',
+                              hintStyle:
+                                  TextStyle(color: palette.secondaryText),
+                              filled: true,
+                              fillColor: palette.dateChipColor,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 14,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide.none,
+                              ),
+                            ),
+                            onChanged: (value) {
+                              widget.controller.setApiModel(value);
+                            },
+                          )
+                        else
+                          ...currentProvider.models.map((m) {
+                            final selected = m == currentModelId;
+                            return _ApiRadioRow(
+                              label: m,
+                              selected: selected,
+                              palette: palette,
+                              onTap: () {
+                                widget.controller.setApiModel(m);
+                              },
+                            );
+                          }),
+                      ],
+                      const SizedBox(height: 26),
+
+                      // ─── 完成按钮 ───
+                      SizedBox(
+                        height: 48,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF7C6CF2),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text(
+                            '完成',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ApiSectionLabel extends StatelessWidget {
+  const _ApiSectionLabel({required this.text, required this.palette});
+
+  final String text;
+  final ChatPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+        color: palette.primaryText,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+  }
+}
+
+class _ApiRadioRow extends StatelessWidget {
+  const _ApiRadioRow({
+    required this.label,
+    required this.selected,
+    required this.palette,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final ChatPalette palette;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF7C6CF2).withValues(alpha: 0.14)
+              : palette.dateChipColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected
+                ? const Color(0xFF7C6CF2)
+                : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              size: 20,
+              color: selected
+                  ? const Color(0xFF7C6CF2)
+                  : palette.secondaryText,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: palette.primaryText,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfilePersonaCard extends StatelessWidget {
+  const _ProfilePersonaCard({required this.controller});
+
+  final ChatAppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+    final personaId = controller.globalPersonaId;
+    Map<String, dynamic>? matched;
+    for (final p in controller.personas) {
+      if (p['id'] == personaId) {
+        matched = p;
+        break;
+      }
+    }
+    final personaName = matched?['name'] as String? ?? '未选择';
+    final personaDesc = matched?['description'] as String? ?? '';
+    final hasPersona = matched != null;
+
+    return FrostPanel(
+      padding: EdgeInsets.zero,
+      borderRadius: 24,
+      child: InkWell(
+        onTap: () => _showPersonaPicker(context, controller),
+        borderRadius: BorderRadius.circular(24),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              if (hasPersona)
+                PersonaAvatarWidget(
+                  size: 56,
+                  personaId: personaId,
+                  bridgeHost: kBridgeHost,
+                  name: personaName,
+                )
+              else
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: palette.accentColor.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(28),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(Icons.person_outline, color: palette.accentColor, size: 28),
+                ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '我的身份',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: palette.secondaryText,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      personaName,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: palette.primaryText,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (hasPersona && personaDesc.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        _personaPreview(personaDesc),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: palette.secondaryText,
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: palette.secondaryText, size: 24),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1259,6 +2134,10 @@ class _ProfileTab extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(height: 18),
+        _ProfilePersonaCard(controller: controller),
+        PresetCard(controller: controller),
+        _ApiConfigCard(controller: controller),
         const SizedBox(height: 18),
         FrostPanel(
           padding: const EdgeInsets.all(16),
@@ -1502,7 +2381,7 @@ class _MessageBodyCard extends StatelessWidget {
                 height: 1.45,
               ),
             ),
-          ),
+          ],
         ),
       );
     }
@@ -2192,6 +3071,7 @@ class _ChatThreadTile extends StatelessWidget {
                   shadowOpacity: 0.14,
                   shadowBlurRadius: 8,
                   shadowOffset: const Offset(0, 4),
+                  avatarUrl: contact.avatarUrl,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -2476,6 +3356,7 @@ class _Avatar extends StatelessWidget {
     this.shadowOpacity = 0.28,
     this.shadowBlurRadius = 14,
     this.shadowOffset = const Offset(0, 8),
+    this.avatarUrl,
   });
 
   final Color color;
@@ -2484,15 +3365,42 @@ class _Avatar extends StatelessWidget {
   final double shadowOpacity;
   final double shadowBlurRadius;
   final Offset shadowOffset;
+  final String? avatarUrl;
 
   @override
   Widget build(BuildContext context) {
+    final radius = size * 0.34;
+
+    if (avatarUrl != null && avatarUrl!.isNotEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(radius),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: shadowOpacity),
+              blurRadius: shadowBlurRadius,
+              offset: shadowOffset,
+            ),
+          ],
+        ),
+        child: AvatarWidget(
+          size: size,
+          avatarUrl: avatarUrl,
+          fallbackColor: color,
+          fallbackText: label,
+          borderRadius: radius,
+        ),
+      );
+    }
+
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(size * 0.34),
+        borderRadius: BorderRadius.circular(radius),
         boxShadow: [
           BoxShadow(
             color: color.withValues(alpha: shadowOpacity),

@@ -10,6 +10,11 @@ import 'chat_summary_store.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'chat_api_models.dart';
+import 'chat_preset_models.dart';
+
+const String kBridgeHost = 'http://192.168.1.247:7700';
 
 class ChatAppController extends ChangeNotifier {
   ChatAppController.seeded({ChatSummaryStore? summaryStore})
@@ -48,6 +53,11 @@ class ChatAppController extends ChangeNotifier {
       ) {
     // 构造函数里只负责执行这两行指令
     syncContactsFromBridge();
+    fetchPersonas();
+    loadGlobalPersona();
+    fetchPresetList();
+    loadGlobalPreset();
+    loadApiConfig();
   }
   /// 把当前所有消息持久化到本地 JSON 文件
   Future<void> _saveMessages() async {
@@ -117,6 +127,59 @@ class ChatAppController extends ChangeNotifier {
   final Set<String> _typingContacts = <String>{};
   final Map<String, ChatContextBundle> _lastContextBundles = {};
   ChatBubbleAppearance _bubbleAppearance;
+  List<Map<String, dynamic>> _personas = [];
+  String _globalPersonaId = '';
+
+  // ---- 预设系统 ----
+  List<PresetInfo> _presetList = [];
+  PresetDetail? _currentPresetDetail;
+  String? _globalPresetName;
+  final Map<String, String> _chatPresetOverrides = {}; // contactId → presetName
+  final Map<String, Map<String, bool>> _chatPromptToggles = {}; // contactId → {identifier: enabled}
+  final Map<String, bool> _globalPromptToggles = {}; // identifier → enabled
+
+  // ---- API 接口配置 ----
+  String _apiProviderId = '';
+  String _apiKey = '';
+  String _apiModelId = '';
+
+  String get apiProviderId => _apiProviderId;
+  String get apiKey => _apiKey;
+  String get apiModelId => _apiModelId;
+  ApiProvider? get currentApiProvider => findProvider(_apiProviderId);
+  bool get isApiConfigured =>
+      _apiKey.isNotEmpty && _apiProviderId.isNotEmpty && _apiModelId.isNotEmpty;
+
+  Future<void> loadApiConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    _apiProviderId = prefs.getString('api_provider_id') ?? '';
+    _apiKey = prefs.getString('api_key') ?? '';
+    _apiModelId = prefs.getString('api_model_id') ?? '';
+    notifyListeners();
+  }
+
+  Future<void> setApiProvider(String providerId) async {
+    _apiProviderId = providerId;
+    _apiModelId = ''; // 切换 provider 时清空 model
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('api_provider_id', providerId);
+    await prefs.setString('api_model_id', '');
+    notifyListeners();
+  }
+
+  Future<void> setApiKey(String key) async {
+    _apiKey = key.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('api_key', _apiKey);
+    notifyListeners();
+  }
+
+  Future<void> setApiModel(String modelId) async {
+    _apiModelId = modelId.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('api_model_id', modelId.trim());
+    notifyListeners();
+  }
 
   ChatTab _currentTab = ChatTab.chats;
   String? _activeConversationId;
@@ -131,6 +194,9 @@ class ChatAppController extends ChangeNotifier {
   ChatBubbleAppearance get bubbleAppearance => _bubbleAppearance;
 
   List<ChatBubblePreset> get bubblePresets => ChatBubblePreset.presets;
+
+  List<Map<String, dynamic>> get personas => List.unmodifiable(_personas);
+  String get globalPersonaId => _globalPersonaId;
 
   List<ChatEmojiEntry> get emojiCatalog =>
       List<ChatEmojiEntry>.unmodifiable(_emojiCatalog);
@@ -215,7 +281,7 @@ Future<void> syncContactsFromBridge() async {
     dio.options.connectTimeout = const Duration(seconds: 5);
     dio.options.receiveTimeout = const Duration(seconds: 10);
 
-    final res = await dio.get('http://192.168.1.247:7700/characters');
+    final res = await dio.get('$kBridgeHost/characters');
     final List<dynamic> list = res.data;
 
     _contacts.clear();
@@ -231,6 +297,7 @@ Future<void> syncContactsFromBridge() async {
       final contactId = name
           .toLowerCase()
           .replaceAll(RegExp(r'[^a-z0-9\u4e00-\u9fa5]+'), '_');
+      final filename = item['filename'] as String? ?? '';
 
       final contact = ChatContact(
         id: contactId,
@@ -240,6 +307,9 @@ Future<void> syncContactsFromBridge() async {
         statusLabel: '在线',
         avatarColor: _colorForContact(contactId),
         emoji: _avatarLabelForName(name),
+        avatarUrl: filename.isNotEmpty
+            ? '$kBridgeHost/avatar/${Uri.encodeComponent(filename)}'
+            : null,
       );
 
       _contacts.add(contact);
@@ -250,18 +320,17 @@ Future<void> syncContactsFromBridge() async {
         unreadCount: 1,
       );
       // 只有新联系人才设置初始消息，已有对话的不覆盖
-if (!_messages.containsKey(contactId)) {
-  _messages[contactId] = [
-    ChatMessage(...)
-  ];
-}
-          id: '$contactId-${now.microsecondsSinceEpoch}',
-          contactId: contactId,
-          sender: ChatMessageSender.ai,
-          body: WordMessageBody(firstMes),
-          sentAt: now,
-        ),
-      ];
+      if (!_messages.containsKey(contactId)) {
+        _messages[contactId] = [
+          ChatMessage(
+            id: '$contactId-${now.microsecondsSinceEpoch}',
+            contactId: contactId,
+            sender: ChatMessageSender.ai,
+            body: WordMessageBody(firstMes),
+            sentAt: now,
+          ),
+        ];
+      }
     }
 
     notifyListeners();
@@ -270,6 +339,228 @@ if (!_messages.containsKey(contactId)) {
     // 桥接服务连不上就保留原来的联系人
   }
 }
+
+  /// 从桥接服务拉取所有 persona 列表
+  Future<void> fetchPersonas() async {
+    try {
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 5);
+      final res = await dio.get('$kBridgeHost/personas');
+      _personas = List<Map<String, dynamic>>.from(res.data);
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  /// 设置全局默认 persona，存入 shared_preferences
+  Future<void> setGlobalPersona(String personaId) async {
+    _globalPersonaId = personaId;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('global_persona_id', personaId);
+    } catch (_) {}
+  }
+
+  /// 启动时恢复全局 persona 设置
+  Future<void> loadGlobalPersona() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _globalPersonaId = prefs.getString('global_persona_id') ?? '';
+    } catch (_) {}
+  }
+
+  /// 给某个聊天单独设置 persona（覆盖全局）
+  Future<void> setChatPersona(String characterName, String personaId) async {
+    try {
+      final dio = Dio();
+      await dio.post(
+        '$kBridgeHost/persona_binding',
+        data: {'character': characterName, 'persona_id': personaId},
+      );
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  /// 解析某个聊天应该用哪个 persona（单聊绑定 > 全局 > 硬编码）
+  Future<Map<String, dynamic>> getResolvedPersona(String characterName) async {
+    // 优先查单聊绑定
+    try {
+      final dio = Dio();
+      final res = await dio.get(
+        '$kBridgeHost/persona_binding/${Uri.encodeComponent(characterName)}',
+      );
+      final data = res.data as Map<String, dynamic>;
+      if ((data['id'] as String? ?? '').isNotEmpty) return data;
+    } catch (_) {}
+    // 其次用全局
+    if (_globalPersonaId.isNotEmpty) {
+      final match = _personas.where((p) => p['id'] == _globalPersonaId);
+      if (match.isNotEmpty) return match.first;
+    }
+    // 兜底
+    return {'id': '', 'name': '江栩栩', 'description': ''};
+  }
+
+  // ========== 预设系统方法 ==========
+
+  List<PresetInfo> get presetList => List.unmodifiable(_presetList);
+  PresetDetail? get currentPresetDetail => _currentPresetDetail;
+  String? get globalPresetName => _globalPresetName;
+
+  /// 从桥接服务拉取预设列表
+  Future<void> fetchPresetList() async {
+    try {
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 5);
+      dio.options.receiveTimeout = const Duration(seconds: 10);
+      final res = await dio.get('$kBridgeHost/presets');
+      final List<dynamic> list = res.data;
+      _presetList = list
+          .map((item) => PresetInfo.fromJson(item as Map<String, dynamic>))
+          .toList();
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  /// 拉取单个预设的完整详情
+  Future<PresetDetail?> fetchPresetDetail(String presetName) async {
+    try {
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 5);
+      dio.options.receiveTimeout = const Duration(seconds: 30);
+      final res = await dio.get(
+        '$kBridgeHost/presets/${Uri.encodeComponent(presetName)}',
+      );
+      final detail = PresetDetail.fromJson(res.data as Map<String, dynamic>);
+      _currentPresetDetail = detail;
+      notifyListeners();
+      return detail;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 设置全局默认预设
+  Future<void> setGlobalPreset(String presetName) async {
+    _globalPresetName = presetName;
+    await fetchPresetDetail(presetName);
+    // 持久化
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('global_preset_name', presetName);
+    notifyListeners();
+  }
+
+  /// 启动时恢复全局预设
+  Future<void> loadGlobalPreset() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString('global_preset_name');
+    if (name != null && name.isNotEmpty) {
+      _globalPresetName = name;
+      await fetchPresetDetail(name);
+    }
+  }
+
+  /// 设置单聊预设覆盖
+  void setChatPreset(String contactId, String? presetName) {
+    if (presetName == null) {
+      _chatPresetOverrides.remove(contactId);
+    } else {
+      _chatPresetOverrides[contactId] = presetName;
+    }
+    notifyListeners();
+  }
+
+  /// 获取某聊天实际使用的预设名
+  String? getResolvedPresetName(String contactId) {
+    return _chatPresetOverrides[contactId] ?? _globalPresetName;
+  }
+
+  /// 设置词条开关覆盖（全局级别）
+  void setGlobalPromptToggle(String identifier, bool enabled) {
+    _globalPromptToggles[identifier] = enabled;
+    notifyListeners();
+  }
+
+  /// 设置词条开关覆盖（单聊级别）
+  void setChatPromptToggle(String contactId, String identifier, bool enabled) {
+    _chatPromptToggles.putIfAbsent(contactId, () => {});
+    _chatPromptToggles[contactId]![identifier] = enabled;
+    notifyListeners();
+  }
+
+  /// 解析某词条在某聊天中的最终开关状态
+  /// 优先级：单聊覆盖 > 全局覆盖 > ST 原始开关
+  bool resolvePromptEnabled(String contactId, String identifier) {
+    // 单聊覆盖
+    final chatToggle = _chatPromptToggles[contactId]?[identifier];
+    if (chatToggle != null) return chatToggle;
+    // 全局覆盖
+    final globalToggle = _globalPromptToggles[identifier];
+    if (globalToggle != null) return globalToggle;
+    // ST 原始开关（从 preset detail 的 promptOrder 读取）
+    if (_currentPresetDetail != null) {
+      try {
+        final orderItem = _currentPresetDetail!.promptOrder
+            .firstWhere((o) => o.identifier == identifier);
+        return orderItem.enabled;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  /// 核心方法：按预设拼装 system prompt
+  /// 返回拼好的完整 prompt 文本
+  String assembleSystemPrompt({
+    required String contactId,
+    required String charDescription,
+    required String charPersonality,
+    required String charScenario,
+    required String personaDescription,
+  }) {
+    final detail = _currentPresetDetail;
+    if (detail == null) {
+      // 没有预设就用旧逻辑
+      return [
+        if (charDescription.isNotEmpty) charDescription,
+        if (charPersonality.isNotEmpty) '性格：$charPersonality',
+        if (charScenario.isNotEmpty) '场景：$charScenario',
+        if (personaDescription.isNotEmpty) '【用户人设】\n$personaDescription',
+      ].join('\n\n');
+    }
+
+    final parts = <String>[];
+
+    for (final orderItem in detail.promptOrder) {
+      final enabled = resolvePromptEnabled(contactId, orderItem.identifier);
+      if (!enabled) continue;
+
+      final prompt = detail.findPrompt(orderItem.identifier);
+
+      // marker 词条 → 替换为实际数据
+      if (prompt != null && prompt.isMarker) {
+        switch (orderItem.identifier) {
+          case 'charDescription':
+            if (charDescription.isNotEmpty) parts.add(charDescription);
+          case 'charPersonality':
+            if (charPersonality.isNotEmpty) parts.add(charPersonality);
+          case 'scenario':
+            if (charScenario.isNotEmpty) parts.add(charScenario);
+          case 'personaDescription':
+            if (personaDescription.isNotEmpty) parts.add(personaDescription);
+          // worldInfoBefore, worldInfoAfter → 后续世界书功能接入
+          // chatHistory, dialogueExamples → 不拼进 system prompt
+        }
+        continue;
+      }
+
+      // 普通词条 → 有 content 就拼进去
+      if (prompt != null && prompt.content.isNotEmpty) {
+        parts.add(prompt.content);
+      }
+    }
+
+    return parts.join('\n\n');
+  }
 
   List<ChatMessage> messagesFor(String contactId) {
     return List<ChatMessage>.unmodifiable(_messages[contactId] ?? const []);
@@ -343,6 +634,7 @@ if (!_messages.containsKey(contactId)) {
       statusLabel: '在线 · 刚加入汪汪机',
       avatarColor: _colorForContact(contactId),
       emoji: _avatarLabelForName(trimmedName),
+      avatarUrl: null,
     );
 
     final introMessage = trimmedGreeting.isEmpty
@@ -534,27 +826,63 @@ if (!_messages.containsKey(contactId)) {
   _typingContacts.add(contactId);
   notifyListeners();
 
+  if (!isApiConfigured) {
+    final errorPayloads = [
+      {'type': 'word', 'text': '【未配置接口】请先在“我”页面设置 API 接口和密钥。'}
+    ];
+    await ingestStructuredPayloads(
+        contactId: contactId, payloads: errorPayloads);
+    _typingContacts.remove(contactId);
+    notifyListeners();
+    return;
+  }
+
   try {
     final dio = Dio();
     dio.options.connectTimeout = const Duration(seconds: 5);
-    dio.options.receiveTimeout = const Duration(seconds: 60);
+    dio.options.receiveTimeout = const Duration(seconds: 120);
 
     // 第一步：从桥接服务拉角色人设
     final contact = contactById(contactId);
     String systemPrompt = '你是一个AI角色，请自然地回复用户。';
+    String userName = '江栩栩';
+    String personaDesc = '';
+    try {
+      final resolved = await getResolvedPersona(contact.name);
+      final pName = resolved['name'] as String? ?? '';
+      final pDesc = resolved['description'] as String? ?? '';
+      if (pName.isNotEmpty) userName = pName;
+      if (pDesc.isNotEmpty) personaDesc = pDesc;
+    } catch (_) {}
     try {
       final charRes = await dio.get(
-        'http://192.168.1.247:7700/characters/${Uri.encodeComponent(contact.name)}',
+        '$kBridgeHost/characters/${Uri.encodeComponent(contact.name)}',
       );
       final charData = charRes.data;
-      final desc = charData['description'] ?? '';
-      final personality = charData['personality'] ?? '';
-      final scenario = charData['scenario'] ?? '';
-      systemPrompt = [
-        if (desc.isNotEmpty) desc,
-        if (personality.isNotEmpty) '性格：$personality',
-        if (scenario.isNotEmpty) '场景：$scenario',
-      ].join('\n\n');
+      final desc = charData['description'] as String? ?? '';
+      final personality = charData['personality'] as String? ?? '';
+      final scenario = charData['scenario'] as String? ?? '';
+
+      // 如果有预设，用预设拼装；否则走旧逻辑
+      if (_currentPresetDetail != null) {
+        systemPrompt = assembleSystemPrompt(
+          contactId: contactId,
+          charDescription: desc,
+          charPersonality: personality,
+          charScenario: scenario,
+          personaDescription: personaDesc,
+        );
+      } else {
+        systemPrompt = [
+          if (desc.isNotEmpty) desc,
+          if (personality.isNotEmpty) '性格：$personality',
+          if (scenario.isNotEmpty) '场景：$scenario',
+          if (personaDesc.isNotEmpty) '【用户人设】\n$personaDesc',
+        ].join('\n\n');
+      }
+
+      // 统一做占位符替换
+      systemPrompt = _replacePlaceholders(systemPrompt, contact.name, userName);
     } catch (_) {
       // 拉不到角色卡就用默认 prompt，不影响聊天
     }
@@ -576,28 +904,67 @@ if (!_messages.containsKey(contactId)) {
         },
     ];
 
-    // 第三步：发给 DeepSeek
-    final response = await dio.post(
-      'https://api.deepseek.com/v1/chat/completions',
-      options: Options(
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer sk-cabf1304e6df446e915ea6a0ab22e310',
-        },
-      ),
-      data: {
-        'model': 'deepseek-chat',
+    // 第三步：根据当前 provider 发请求
+    debugPrint('[sendTextMessage] provider=$_apiProviderId model=$_apiModelId');
+    final provider = currentApiProvider!;
+
+    // Claude API 格式不同，需要特殊处理
+    final Map<String, dynamic> requestData;
+    final Map<String, String> requestHeaders;
+
+    if (_apiProviderId == 'claude') {
+      requestHeaders = {
+        'Content-Type': 'application/json',
+        'x-api-key': _apiKey,
+        'anthropic-version': '2023-06-01',
+      };
+      requestData = {
+        'model': _apiModelId,
+        'max_tokens': 1024,
+        'system': systemPrompt,
+        'messages': [
+          for (final m in recentHistory)
+            {
+              'role': m.sender == ChatMessageSender.user ? 'user' : 'assistant',
+              'content': (m.body as WordMessageBody).text,
+            },
+        ],
+      };
+    } else {
+      requestHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $_apiKey',
+      };
+      requestData = {
+        'model': _apiModelId,
         'messages': messages,
-        'max_tokens': 500,
+        'max_tokens': _apiModelId.contains('reasoner') ? 4000 : 1024,
         'stream': false,
-      },
+      };
+    }
+
+    final response = await dio.post(
+      provider.baseUrl,
+      options: Options(headers: requestHeaders),
+      data: requestData,
     );
 
-    final String aiReplyText =
-        response.data['choices'][0]['message']['content'] as String;
+    // Claude 返回格式不同
+    final String aiReplyText;
+    if (_apiProviderId == 'claude') {
+      final content = response.data['content'] as List;
+      aiReplyText = content
+          .where((block) => block['type'] == 'text')
+          .map((block) => block['text'] as String)
+          .join('\n');
+    } else {
+      aiReplyText =
+          response.data['choices'][0]['message']['content'] as String;
+    }
+    final String cleanedReply = _replacePlaceholders(aiReplyText, contact.name, userName);
 
     final replyPayloads = [
-      {'type': 'word', 'text': aiReplyText}
+      {'type': 'word', 'text': cleanedReply}
     ];
     await ingestStructuredPayloads(
         contactId: contactId, payloads: replyPayloads);
@@ -1097,6 +1464,14 @@ if (!_messages.containsKey(contactId)) {
       return '新';
     }
     return String.fromCharCode(name.runes.first);
+  }
+
+  String _replacePlaceholders(String text, String charName, [String userName = '江栩栩']) {
+    return text
+        .replaceAll('{{user}}', userName)
+        .replaceAll('{{char}}', charName)
+        .replaceAll('{{User}}', userName)
+        .replaceAll('{{Char}}', charName);
   }
 
   @override
