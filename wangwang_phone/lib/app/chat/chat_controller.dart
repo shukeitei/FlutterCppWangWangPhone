@@ -74,6 +74,12 @@ class ChatAppController extends ChangeNotifier {
             'sender': m.sender.name,
             'text': body is WordMessageBody ? body.text : '',
             'sentAt': m.sentAt.toIso8601String(),
+            'isHidden': m.isHidden,
+            'alternatives': m.alternatives.map((alt) {
+              if (alt is WordMessageBody) return alt.text;
+              return '';
+            }).toList(),
+            'activeAltIndex': m.activeAltIndex,
           };
         }).toList();
       }
@@ -93,6 +99,11 @@ class ChatAppController extends ChangeNotifier {
         final contactId = entry.key;
         if (!_messages.containsKey(contactId)) continue;
         final msgs = (entry.value as List).map((m) {
+          final altList = (m['alternatives'] as List?)
+                  ?.map<ChatMessageBody>(
+                      (t) => WordMessageBody(t as String? ?? ''))
+                  .toList() ??
+              [];
           return ChatMessage(
             id: m['id'],
             contactId: m['contactId'],
@@ -101,6 +112,9 @@ class ChatAppController extends ChangeNotifier {
                 : ChatMessageSender.ai,
             body: WordMessageBody(m['text'] ?? ''),
             sentAt: DateTime.parse(m['sentAt']),
+            isHidden: m['isHidden'] == true,
+            alternatives: altList,
+            activeAltIndex: m['activeAltIndex'] as int? ?? 0,
           );
         }).toList();
         _messages[contactId] = msgs;
@@ -802,184 +816,390 @@ Future<void> syncContactsFromBridge() async {
     );
   }
 
-  /// 发送用户消息后，立即更新会话列表，再异步追加一条角色回复，模拟聊天链路闭环。
-  Future<void> sendTextMessage({
-  required String contactId,
-  required String text,
-}) async {
-  final trimmed = text.trim();
-  if (trimmed.isEmpty) return;
-
-  final now = DateTime.now();
-  _appendMessage(
-    contactId: contactId,
-    message: ChatMessage(
-      id: '$contactId-${now.microsecondsSinceEpoch}',
-      contactId: contactId,
-      sender: ChatMessageSender.user,
-      body: WordMessageBody(trimmed),
-      sentAt: now,
-    ),
-    unreadCount: 0,
-  );
-  await _saveMessages(); // 加这行，用户发消息就立刻存一次
-  _typingContacts.add(contactId);
-  notifyListeners();
-
-  if (!isApiConfigured) {
-    final errorPayloads = [
-      {'type': 'word', 'text': '【未配置接口】请先在“我”页面设置 API 接口和密钥。'}
-    ];
-    await ingestStructuredPayloads(
-        contactId: contactId, payloads: errorPayloads);
-    _typingContacts.remove(contactId);
+  /// 删除单条消息
+  Future<void> deleteMessage({required String contactId, required String messageId}) async {
+    final msgs = _messages[contactId];
+    if (msgs == null) return;
+    msgs.removeWhere((m) => m.id == messageId);
+    if (msgs.isNotEmpty) {
+      final last = msgs.last;
+      _threads[contactId] = _threads[contactId]!.copyWith(
+        lastMessage: last.previewText,
+        updatedAt: last.sentAt,
+      );
+    } else {
+      _threads[contactId] = _threads[contactId]!.copyWith(lastMessage: '');
+    }
     notifyListeners();
-    return;
+    await _saveMessages();
   }
 
-  try {
-    final dio = Dio();
-    dio.options.connectTimeout = const Duration(seconds: 5);
-    dio.options.receiveTimeout = const Duration(seconds: 120);
-
-    // 第一步：从桥接服务拉角色人设
-    final contact = contactById(contactId);
-    String systemPrompt = '你是一个AI角色，请自然地回复用户。';
-    String userName = '江栩栩';
-    String personaDesc = '';
-    try {
-      final resolved = await getResolvedPersona(contact.name);
-      final pName = resolved['name'] as String? ?? '';
-      final pDesc = resolved['description'] as String? ?? '';
-      if (pName.isNotEmpty) userName = pName;
-      if (pDesc.isNotEmpty) personaDesc = pDesc;
-    } catch (_) {}
-    try {
-      final charRes = await dio.get(
-        '$kBridgeHost/characters/${Uri.encodeComponent(contact.name)}',
+  /// 批量删除消息
+  Future<void> batchDeleteMessages({required String contactId, required Set<String> messageIds}) async {
+    final msgs = _messages[contactId];
+    if (msgs == null) return;
+    msgs.removeWhere((m) => messageIds.contains(m.id));
+    if (msgs.isNotEmpty) {
+      final last = msgs.last;
+      _threads[contactId] = _threads[contactId]!.copyWith(
+        lastMessage: last.previewText,
+        updatedAt: last.sentAt,
       );
-      final charData = charRes.data;
-      final desc = charData['description'] as String? ?? '';
-      final personality = charData['personality'] as String? ?? '';
-      final scenario = charData['scenario'] as String? ?? '';
-
-      // 如果有预设，用预设拼装；否则走旧逻辑
-      if (_currentPresetDetail != null) {
-        systemPrompt = assembleSystemPrompt(
-          contactId: contactId,
-          charDescription: desc,
-          charPersonality: personality,
-          charScenario: scenario,
-          personaDescription: personaDesc,
-        );
-      } else {
-        systemPrompt = [
-          if (desc.isNotEmpty) desc,
-          if (personality.isNotEmpty) '性格：$personality',
-          if (scenario.isNotEmpty) '场景：$scenario',
-          if (personaDesc.isNotEmpty) '【用户人设】\n$personaDesc',
-        ].join('\n\n');
-      }
-
-      // 统一做占位符替换
-      systemPrompt = _replacePlaceholders(systemPrompt, contact.name, userName);
-    } catch (_) {
-      // 拉不到角色卡就用默认 prompt，不影响聊天
-    }
-
-    // 第二步：构建对话历史（最近10条）
-    final history = messagesFor(contactId)
-        .where((m) => m.body is WordMessageBody)
-        .toList();
-    final recentHistory = history.length > 100
-        ? history.sublist(history.length - 100)
-        : history;
-
-    final messages = <Map<String, dynamic>>[
-      {'role': 'system', 'content': systemPrompt},
-      for (final m in recentHistory)
-        {
-          'role': m.sender == ChatMessageSender.user ? 'user' : 'assistant',
-          'content': (m.body as WordMessageBody).text,
-        },
-    ];
-
-    // 第三步：根据当前 provider 发请求
-    debugPrint('[sendTextMessage] provider=$_apiProviderId model=$_apiModelId');
-    final provider = currentApiProvider!;
-
-    // Claude API 格式不同，需要特殊处理
-    final Map<String, dynamic> requestData;
-    final Map<String, String> requestHeaders;
-
-    if (_apiProviderId == 'claude') {
-      requestHeaders = {
-        'Content-Type': 'application/json',
-        'x-api-key': _apiKey,
-        'anthropic-version': '2023-06-01',
-      };
-      requestData = {
-        'model': _apiModelId,
-        'max_tokens': 1024,
-        'system': systemPrompt,
-        'messages': [
-          for (final m in recentHistory)
-            {
-              'role': m.sender == ChatMessageSender.user ? 'user' : 'assistant',
-              'content': (m.body as WordMessageBody).text,
-            },
-        ],
-      };
     } else {
-      requestHeaders = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $_apiKey',
-      };
-      requestData = {
-        'model': _apiModelId,
-        'messages': messages,
-        'max_tokens': _apiModelId.contains('reasoner') ? 4000 : 1024,
-        'stream': false,
-      };
+      _threads[contactId] = _threads[contactId]!.copyWith(lastMessage: '');
     }
+    notifyListeners();
+    await _saveMessages();
+  }
 
-    final response = await dio.post(
-      provider.baseUrl,
-      options: Options(headers: requestHeaders),
-      data: requestData,
+  /// 编辑消息内容（改写）
+  Future<void> editMessage({required String contactId, required String messageId, required String newText}) async {
+    final msgs = _messages[contactId];
+    if (msgs == null) return;
+    final idx = msgs.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+    msgs[idx] = msgs[idx].copyWith(body: WordMessageBody(newText));
+    if (idx == msgs.length - 1) {
+      _threads[contactId] = _threads[contactId]!.copyWith(lastMessage: newText);
+    }
+    notifyListeners();
+    await _saveMessages();
+  }
+
+  /// 切换消息隐藏状态
+  Future<void> toggleHideMessage({required String contactId, required String messageId}) async {
+    final msgs = _messages[contactId];
+    if (msgs == null) return;
+    final idx = msgs.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+    msgs[idx] = msgs[idx].copyWith(isHidden: !msgs[idx].isHidden);
+    notifyListeners();
+    await _saveMessages();
+  }
+
+  /// 批量切换隐藏状态
+  Future<void> batchToggleHideMessages({required String contactId, required Set<String> messageIds, required bool hide}) async {
+    final msgs = _messages[contactId];
+    if (msgs == null) return;
+    for (var i = 0; i < msgs.length; i++) {
+      if (messageIds.contains(msgs[i].id)) {
+        msgs[i] = msgs[i].copyWith(isHidden: hide);
+      }
+    }
+    notifyListeners();
+    await _saveMessages();
+  }
+
+  /// 回溯：删除指定消息及之后的所有消息
+  Future<void> rollbackToMessage({required String contactId, required String messageId}) async {
+    final msgs = _messages[contactId];
+    if (msgs == null) return;
+    final idx = msgs.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+    msgs.removeRange(idx, msgs.length);
+    if (msgs.isNotEmpty) {
+      final last = msgs.last;
+      _threads[contactId] = _threads[contactId]!.copyWith(
+        lastMessage: last.previewText,
+        updatedAt: last.sentAt,
+      );
+    } else {
+      _threads[contactId] = _threads[contactId]!.copyWith(lastMessage: '');
+    }
+    notifyListeners();
+    await _saveMessages();
+  }
+
+  /// 重新生成最后一条 AI 回复
+  Future<void> rerollLastReply({required String contactId}) async {
+    final msgs = _messages[contactId];
+    if (msgs == null || msgs.isEmpty) return;
+    if (msgs.last.sender != ChatMessageSender.ai) return;
+
+    final lastMsg = msgs.last;
+    final List<ChatMessageBody> alts = lastMsg.alternatives.isNotEmpty
+        ? List.from(lastMsg.alternatives)
+        : [lastMsg.body];
+
+    msgs.removeLast();
+    notifyListeners();
+
+    await _triggerAiReply(contactId: contactId);
+
+    // _appendMessage 在 _triggerAiReply 内部会用 List.from 重建列表，
+    // 所以这里必须重新取一次 _messages[contactId]，旧的 msgs 引用已脱钩。
+    final freshMsgs = _messages[contactId];
+    if (freshMsgs != null &&
+        freshMsgs.isNotEmpty &&
+        freshMsgs.last.sender == ChatMessageSender.ai) {
+      final newMsg = freshMsgs.last;
+      alts.add(newMsg.body);
+      freshMsgs[freshMsgs.length - 1] = newMsg.copyWith(
+        alternatives: alts,
+        activeAltIndex: alts.length - 1,
+      );
+      notifyListeners();
+      await _saveMessages();
+    }
+  }
+
+  /// 切换最后一条 AI 消息的版本
+  Future<void> switchAltVersion({
+    required String contactId,
+    required int newIndex,
+  }) async {
+    final msgs = _messages[contactId];
+    if (msgs == null || msgs.isEmpty) return;
+    final lastMsg = msgs.last;
+    if (lastMsg.alternatives.isEmpty) return;
+    if (newIndex < 0 || newIndex >= lastMsg.alternatives.length) return;
+
+    msgs[msgs.length - 1] = lastMsg.copyWith(
+      body: lastMsg.alternatives[newIndex],
+      activeAltIndex: newIndex,
+    );
+    _threads[contactId] = _threads[contactId]!.copyWith(
+      lastMessage: msgs.last.previewText,
+    );
+    notifyListeners();
+    await _saveMessages();
+  }
+
+  /// 重置对话：清空聊天记录，恢复为角色初始消息
+  Future<void> clearChat({required String contactId, bool clearMemories = false}) async {
+    final contact = contactById(contactId);
+    String firstMes = '你好，我是${contact.name}。';
+    try {
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 3);
+      final res = await dio.get('$kBridgeHost/characters/${Uri.encodeComponent(contact.name)}');
+      firstMes = res.data['first_mes'] as String? ?? firstMes;
+    } catch (_) {}
+
+    final now = DateTime.now();
+    _messages[contactId] = [
+      ChatMessage(
+        id: '$contactId-${now.microsecondsSinceEpoch}',
+        contactId: contactId,
+        sender: ChatMessageSender.ai,
+        body: WordMessageBody(firstMes),
+        sentAt: now,
+      ),
+    ];
+    _threads[contactId] = _threads[contactId]!.copyWith(
+      lastMessage: firstMes,
+      updatedAt: now,
+      unreadCount: 0,
     );
 
-    // Claude 返回格式不同
-    final String aiReplyText;
-    if (_apiProviderId == 'claude') {
-      final content = response.data['content'] as List;
-      aiReplyText = content
-          .where((block) => block['type'] == 'text')
-          .map((block) => block['text'] as String)
-          .join('\n');
-    } else {
-      aiReplyText =
-          response.data['choices'][0]['message']['content'] as String;
+    if (clearMemories) {
+      _summaries.remove(contactId);
+      _memories.removeWhere((m) => m.contactId == contactId);
+      _diaries.removeWhere((d) => d.contactId == contactId);
+      _thoughts.removeWhere((t) => t.contactId == contactId);
+      _systemEntries.removeWhere((s) => s.contactId == contactId);
+      await _summaryStore.saveSummaries(_summaries);
     }
-    final String cleanedReply = _replacePlaceholders(aiReplyText, contact.name, userName);
 
-    final replyPayloads = [
-      {'type': 'word', 'text': cleanedReply}
-    ];
-    await ingestStructuredPayloads(
-        contactId: contactId, payloads: replyPayloads);
-        await _saveMessages();
-  } catch (e) {
-    final errorPayloads = [
-      {'type': 'word', 'text': '【信号中断】连不上酒馆啦！\n具体原因：$e'}
-    ];
-    await ingestStructuredPayloads(
-        contactId: contactId, payloads: errorPayloads);
-  } finally {
-    _typingContacts.remove(contactId);
     notifyListeners();
+    await _saveMessages();
   }
-}
+
+  /// 发送用户消息后，立即更新会话列表，再异步追加一条角色回复，模拟聊天链路闭环。
+  Future<void> sendTextMessage({
+    required String contactId,
+    required String text,
+  }) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+
+    // 发新消息前，把上一条 AI 消息的 alternatives 清理掉，只保留当前选中版本
+    final existingMsgs = _messages[contactId];
+    if (existingMsgs != null && existingMsgs.isNotEmpty) {
+      final last = existingMsgs.last;
+      if (last.sender == ChatMessageSender.ai &&
+          last.alternatives.length > 1) {
+        existingMsgs[existingMsgs.length - 1] = last.copyWith(
+          alternatives: const [],
+          activeAltIndex: 0,
+        );
+      }
+    }
+
+    final now = DateTime.now();
+    _appendMessage(
+      contactId: contactId,
+      message: ChatMessage(
+        id: '$contactId-${now.microsecondsSinceEpoch}',
+        contactId: contactId,
+        sender: ChatMessageSender.user,
+        body: WordMessageBody(trimmed),
+        sentAt: now,
+      ),
+      unreadCount: 0,
+    );
+    await _saveMessages();
+
+    if (!isApiConfigured) {
+      final errorPayloads = [
+        {'type': 'word', 'text': '【未配置接口】请先在“我”页面设置 API 接口和密钥。'}
+      ];
+      await ingestStructuredPayloads(
+          contactId: contactId, payloads: errorPayloads);
+      return;
+    }
+
+    await _triggerAiReply(contactId: contactId);
+  }
+
+  /// 触发 AI 回复（不添加用户消息，只调 API 拿回复）
+  Future<void> _triggerAiReply({required String contactId}) async {
+    _typingContacts.add(contactId);
+    notifyListeners();
+
+    try {
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 5);
+      dio.options.receiveTimeout = const Duration(seconds: 120);
+
+      // 第一步：从桥接服务拉角色人设
+      final contact = contactById(contactId);
+      String systemPrompt = '你是一个AI角色，请自然地回复用户。';
+      String userName = '江栩栩';
+      String personaDesc = '';
+      try {
+        final resolved = await getResolvedPersona(contact.name);
+        final pName = resolved['name'] as String? ?? '';
+        final pDesc = resolved['description'] as String? ?? '';
+        if (pName.isNotEmpty) userName = pName;
+        if (pDesc.isNotEmpty) personaDesc = pDesc;
+      } catch (_) {}
+      try {
+        final charRes = await dio.get(
+          '$kBridgeHost/characters/${Uri.encodeComponent(contact.name)}',
+        );
+        final charData = charRes.data;
+        final desc = charData['description'] as String? ?? '';
+        final personality = charData['personality'] as String? ?? '';
+        final scenario = charData['scenario'] as String? ?? '';
+
+        // 如果有预设，用预设拼装；否则走旧逻辑
+        if (_currentPresetDetail != null) {
+          systemPrompt = assembleSystemPrompt(
+            contactId: contactId,
+            charDescription: desc,
+            charPersonality: personality,
+            charScenario: scenario,
+            personaDescription: personaDesc,
+          );
+        } else {
+          systemPrompt = [
+            if (desc.isNotEmpty) desc,
+            if (personality.isNotEmpty) '性格：$personality',
+            if (scenario.isNotEmpty) '场景：$scenario',
+            if (personaDesc.isNotEmpty) '【用户人设】\n$personaDesc',
+          ].join('\n\n');
+        }
+
+        // 统一做占位符替换
+        systemPrompt = _replacePlaceholders(systemPrompt, contact.name, userName);
+      } catch (_) {
+        // 拉不到角色卡就用默认 prompt，不影响聊天
+      }
+
+      // 第二步：构建对话历史（过滤隐藏消息）
+      final history = messagesFor(contactId)
+          .where((m) => m.body is WordMessageBody && !m.isHidden)
+          .toList();
+      final recentHistory = history.length > 100
+          ? history.sublist(history.length - 100)
+          : history;
+
+      final messages = <Map<String, dynamic>>[
+        {'role': 'system', 'content': systemPrompt},
+        for (final m in recentHistory)
+          {
+            'role': m.sender == ChatMessageSender.user ? 'user' : 'assistant',
+            'content': (m.body as WordMessageBody).text,
+          },
+      ];
+
+      // 第三步：根据当前 provider 发请求
+      debugPrint('[_triggerAiReply] provider=$_apiProviderId model=$_apiModelId');
+      final provider = currentApiProvider!;
+
+      // Claude API 格式不同，需要特殊处理
+      final Map<String, dynamic> requestData;
+      final Map<String, String> requestHeaders;
+
+      if (_apiProviderId == 'claude') {
+        requestHeaders = {
+          'Content-Type': 'application/json',
+          'x-api-key': _apiKey,
+          'anthropic-version': '2023-06-01',
+        };
+        requestData = {
+          'model': _apiModelId,
+          'max_tokens': 1024,
+          'system': systemPrompt,
+          'messages': [
+            for (final m in recentHistory)
+              {
+                'role': m.sender == ChatMessageSender.user ? 'user' : 'assistant',
+                'content': (m.body as WordMessageBody).text,
+              },
+          ],
+        };
+      } else {
+        requestHeaders = {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_apiKey',
+        };
+        requestData = {
+          'model': _apiModelId,
+          'messages': messages,
+          'max_tokens': _apiModelId.contains('reasoner') ? 4000 : 1024,
+          'stream': false,
+        };
+      }
+
+      final response = await dio.post(
+        provider.baseUrl,
+        options: Options(headers: requestHeaders),
+        data: requestData,
+      );
+
+      // Claude 返回格式不同
+      final String aiReplyText;
+      if (_apiProviderId == 'claude') {
+        final content = response.data['content'] as List;
+        aiReplyText = content
+            .where((block) => block['type'] == 'text')
+            .map((block) => block['text'] as String)
+            .join('\n');
+      } else {
+        aiReplyText =
+            response.data['choices'][0]['message']['content'] as String;
+      }
+      final String cleanedReply = _replacePlaceholders(aiReplyText, contact.name, userName);
+
+      final replyPayloads = [
+        {'type': 'word', 'text': cleanedReply}
+      ];
+      await ingestStructuredPayloads(
+          contactId: contactId, payloads: replyPayloads);
+      await _saveMessages();
+    } catch (e) {
+      final errorPayloads = [
+        {'type': 'word', 'text': '【信号中断】连不上酒馆啦！\n具体原因：$e'}
+      ];
+      await ingestStructuredPayloads(
+          contactId: contactId, payloads: errorPayloads);
+    } finally {
+      _typingContacts.remove(contactId);
+      notifyListeners();
+    }
+  }
 
     List<Map<String, dynamic>> _buildAiReplyPayloads({
     required ChatContact contact,
