@@ -189,25 +189,68 @@ class ChatAppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 群聊发消息：暂时只追加用户消息，不调 AI（AI 多角色回复在后续批次接入）
-  void sendGroupMessage({required String groupId, required String text}) {
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) return;
-    if (!_groups.containsKey(groupId)) return;
+  /// 群聊发消息 / 召唤角色发言。
+  /// - 随机模式 + summonOnly=false：追加用户消息 → 自动触发 AI 接力（步骤 8 接入）
+  /// - 手动模式 + summonOnly=false：只追加用户消息，不触发 AI，等召唤
+  /// - summonOnly=true：不追加用户消息，触发 targetContactId 角色发言（步骤 8 接入）
+  Future<void> sendGroupMessage({
+    required String groupId,
+    required String text,
+    String? targetContactId,
+    bool summonOnly = false,
+  }) async {
+    final group = _groups[groupId];
+    if (group == null) return;
 
-    final now = DateTime.now();
-    _appendMessage(
-      contactId: groupId,
-      message: ChatMessage(
-        id: '$groupId-${now.microsecondsSinceEpoch}',
+    if (!summonOnly) {
+      final trimmed = text.trim();
+      if (trimmed.isEmpty) return;
+
+      final now = DateTime.now();
+      _appendMessage(
         contactId: groupId,
-        sender: ChatMessageSender.user,
-        body: WordMessageBody(trimmed),
-        sentAt: now,
-      ),
-      unreadCount: 0,
-    );
-    _saveMessages();
+        message: ChatMessage(
+          id: '$groupId-${now.microsecondsSinceEpoch}',
+          contactId: groupId,
+          sender: ChatMessageSender.user,
+          body: WordMessageBody(trimmed),
+          sentAt: now,
+        ),
+        unreadCount: 0,
+      );
+      await _saveMessages();
+    }
+
+    final isRandom = isGroupRandomMode(groupId);
+
+    if (isRandom && !summonOnly) {
+      // 随机接力：用户发完消息后自动触发 AI
+      await _sendGroupRandomReply(groupId, group, text);
+    } else if (summonOnly && targetContactId != null) {
+      // 手动召唤：触发指定角色发言
+      await _sendGroupManualReply(groupId, group, targetContactId);
+    }
+    // 手动模式 + 非召唤：什么都不做，等用户召唤
+  }
+
+  /// 步骤 8 接入：随机接力 AI 回复
+  // ignore: unused_element
+  Future<void> _sendGroupRandomReply(
+    String groupId,
+    ChatGroup group,
+    String userText,
+  ) async {
+    // TODO(group-ai): 接入随机接力 AI 调用（步骤 8）
+  }
+
+  /// 步骤 8 接入：手动召唤指定角色 AI 回复
+  // ignore: unused_element
+  Future<void> _sendGroupManualReply(
+    String groupId,
+    ChatGroup group,
+    String targetContactId,
+  ) async {
+    // TODO(group-ai): 接入指定角色 AI 调用（步骤 8）
   }
 
   Future<void> loadPersistedGroups() async {

@@ -27,7 +27,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  String? _targetContactId; // 手动模式下被 @ 的角色 id
+  bool _waitingForSummon = false; // 手动模式下，发完消息后等待召唤
 
   ChatAppController get controller => widget.controller;
 
@@ -52,6 +52,10 @@ class _GroupChatPageState extends State<GroupChatPage> {
   }
 
   void _onInputChanged() {
+    // 切回随机模式时，召唤条不再有意义
+    if (controller.isGroupRandomMode(widget.groupId) && _waitingForSummon) {
+      _waitingForSummon = false;
+    }
     setState(() {});
   }
 
@@ -167,9 +171,13 @@ class _GroupChatPageState extends State<GroupChatPage> {
   void _send() {
     final text = _inputController.text.trim();
     if (text.isEmpty) return;
+    final isManual = !controller.isGroupRandomMode(widget.groupId);
     controller.sendGroupMessage(groupId: widget.groupId, text: text);
     _inputController.clear();
     _scrollToBottom();
+    if (isManual) {
+      setState(() => _waitingForSummon = true);
+    }
   }
 
   @override
@@ -482,57 +490,50 @@ class _GroupChatPageState extends State<GroupChatPage> {
     );
   }
 
-  String _targetName() {
-    if (_targetContactId == null) return '';
-    try {
-      return controller.contactById(_targetContactId!).name;
-    } catch (_) {
-      return '未知';
-    }
-  }
-
-  Widget _buildTargetIndicator(ChatPalette palette) {
-    final ChatContact contact;
-    try {
-      contact = controller.contactById(_targetContactId!);
-    } catch (_) {
-      return const SizedBox.shrink();
-    }
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: palette.accentColor.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          AvatarWidget(
-            size: 20,
-            fallbackColor: contact.avatarColor,
-            fallbackText: contact.emoji,
-            avatarUrl: contact.avatarUrl,
+  Widget _buildSummonBar(ChatPalette palette, ChatGroup group) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _showSummonPicker(group),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: palette.accentColor.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: palette.accentColor.withValues(alpha: 0.3),
+            width: 0.5,
           ),
-          const SizedBox(width: 8),
-          Text(
-            '${contact.name} 将发言',
-            style: TextStyle(color: palette.primaryText, fontSize: 12),
-          ),
-          const Spacer(),
-          GestureDetector(
-            onTap: () => setState(() => _targetContactId = null),
-            child: Icon(
-              Icons.close_rounded,
-              size: 16,
-              color: palette.secondaryText,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.record_voice_over_rounded,
+              size: 18,
+              color: palette.accentColor,
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            Text(
+              '点击召唤角色发言',
+              style: TextStyle(
+                color: palette.accentColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const Spacer(),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: palette.accentColor.withValues(alpha: 0.6),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  void _showAtPicker(ChatGroup group) {
+  void _showSummonPicker(ChatGroup group) {
     final palette = ChatPalette.of(context);
     showModalBottomSheet(
       context: context,
@@ -550,7 +551,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
                 child: Row(
                   children: [
                     Text(
-                      '选择发言角色',
+                      '召唤谁来发言？',
                       style: TextStyle(
                         color: palette.primaryText,
                         fontSize: 16,
@@ -585,7 +586,6 @@ class _GroupChatPageState extends State<GroupChatPage> {
                     } catch (_) {
                       return const SizedBox.shrink();
                     }
-                    final selected = _targetContactId == contactId;
                     return ListTile(
                       leading: AvatarWidget(
                         size: 36,
@@ -596,22 +596,18 @@ class _GroupChatPageState extends State<GroupChatPage> {
                       title: Text(
                         contact.name,
                         style: TextStyle(
-                          color: selected
-                              ? palette.accentColor
-                              : palette.primaryText,
+                          color: palette.primaryText,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      trailing: selected
-                          ? Icon(
-                              Icons.check_circle_rounded,
-                              color: palette.accentColor,
-                              size: 20,
-                            )
-                          : null,
                       onTap: () {
-                        setState(() => _targetContactId = contactId);
                         Navigator.pop(sheetCtx);
+                        controller.sendGroupMessage(
+                          groupId: widget.groupId,
+                          text: '',
+                          targetContactId: contactId,
+                          summonOnly: true,
+                        );
                       },
                     );
                   },
@@ -627,11 +623,6 @@ class _GroupChatPageState extends State<GroupChatPage> {
   Widget _buildInputBar(ChatPalette palette, bool hasDraftText, ChatGroup group) {
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
     final isManual = !controller.isGroupRandomMode(widget.groupId);
-    final hintText = isManual
-        ? (_targetContactId != null
-            ? '对 ${_targetName()} 说…'
-            : '点 @ 选择发言角色')
-        : '发送消息…';
 
     return Container(
       decoration: BoxDecoration(
@@ -644,45 +635,10 @@ class _GroupChatPageState extends State<GroupChatPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (isManual && _targetContactId != null)
-            _buildTargetIndicator(palette),
+          if (isManual && _waitingForSummon) _buildSummonBar(palette, group),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (isManual)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8, bottom: 2),
-                  child: GestureDetector(
-                    onTap: () => _showAtPicker(group),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: _targetContactId != null
-                            ? palette.accentColor.withValues(alpha: 0.2)
-                            : palette.inputSurface,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: _targetContactId != null
-                              ? palette.accentColor.withValues(alpha: 0.4)
-                              : palette.inputBorderColor,
-                        ),
-                      ),
-                      child: Center(
-                        child: Text(
-                          '@',
-                          style: TextStyle(
-                            color: _targetContactId != null
-                                ? palette.accentColor
-                                : palette.secondaryText,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
               Expanded(
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -698,22 +654,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
                     style: TextStyle(color: palette.primaryText, fontSize: 15),
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _send(),
-                    onChanged: (text) {
-                      if (isManual && text.endsWith('@')) {
-                        // 用户手输 @ 也弹出选人
-                        final stripped =
-                            text.substring(0, text.length - 1);
-                        _inputController.value = TextEditingValue(
-                          text: stripped,
-                          selection: TextSelection.collapsed(
-                            offset: stripped.length,
-                          ),
-                        );
-                        _showAtPicker(group);
-                      }
-                    },
                     decoration: InputDecoration(
-                      hintText: hintText,
+                      hintText: '发送消息…',
                       hintStyle: TextStyle(color: palette.secondaryText),
                       border: InputBorder.none,
                       isCollapsed: true,
