@@ -451,7 +451,9 @@ ${memberProfiles.join('\n\n')}
 4. 回复要自然口语化，像真的群聊一样
 
 你必须且只能返回以下格式的 JSON 数组，不要返回任何其他内容：
-[{"name":"角色名","reply":"回复内容"},{"name":"角色名","reply":"回复内容"}]''';
+[{"name":"角色名","reply":"回复内容"},{"name":"角色名","reply":"回复内容"}]
+
+不要添加任何解释、前缀或 markdown 格式（不要 ```json 包裹），直接返回 JSON 数组。''';
 
     final history = _buildGroupHistory(groupId);
     final rawReply = await _callGroupChatApi(
@@ -461,25 +463,32 @@ ${memberProfiles.join('\n\n')}
       maxTokens: 2000,
     );
 
-    // 解析 JSON 数组（AI 可能在前后塞废话）
-    final jsonMatch = RegExp(r'\[.*\]', dotAll: true).firstMatch(rawReply);
-    if (jsonMatch == null) {
-      _appendGroupFallbackReply(groupId, rawReply);
-      return;
+    // 解析 JSON 数组（AI 可能在前后塞废话 / markdown / 换行）
+    List<dynamic>? replies;
+    try {
+      var cleaned = rawReply
+          .replaceAll(RegExp(r'```json\s*'), '')
+          .replaceAll(RegExp(r'```\s*'), '')
+          .trim();
+      final match = RegExp(r'\[[\s\S]*\]').firstMatch(cleaned);
+      if (match != null) {
+        replies = jsonDecode(match.group(0)!) as List<dynamic>;
+      } else {
+        replies = jsonDecode(cleaned) as List<dynamic>;
+      }
+    } catch (_) {
+      replies = null;
     }
 
-    List<dynamic> replies;
-    try {
-      replies = jsonDecode(jsonMatch.group(0)!) as List<dynamic>;
-    } catch (_) {
+    if (replies == null || replies.isEmpty) {
       _appendGroupFallbackReply(groupId, rawReply);
       return;
     }
 
     for (final entry in replies) {
       if (entry is! Map) continue;
-      final name = (entry['name'] as String?)?.trim() ?? '';
-      final replyText = (entry['reply'] as String?)?.trim() ?? '';
+      final name = (entry['name'] ?? '').toString().trim();
+      final replyText = (entry['reply'] ?? '').toString().trim();
       if (name.isEmpty || replyText.isEmpty) continue;
 
       // 把 name 映射回 contactId：先精确匹配，再模糊包含（AI 可能返回去前缀的名字）
