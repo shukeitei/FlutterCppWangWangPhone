@@ -333,11 +333,7 @@ class ChatAppController extends ChangeNotifier {
     return List<ChatSystemEntry>.unmodifiable(items);
   }
 
-  List<ChatContact> get contacts {
-    final sorted = List<ChatContact>.from(_contacts)
-      ..sort((a, b) => a.name.compareTo(b.name));
-    return List<ChatContact>.unmodifiable(sorted);
-  }
+  List<ChatContact> get contacts => List<ChatContact>.unmodifiable(_contacts);
 
   List<MomentPost> get moments {
     final sortedMoments = List<MomentPost>.from(_moments)
