@@ -27,6 +27,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  String? _targetContactId; // 手动模式下被 @ 的角色 id
 
   ChatAppController get controller => widget.controller;
 
@@ -247,7 +248,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
                             },
                           ),
                   ),
-                  _buildInputBar(palette, hasDraftText),
+                  _buildInputBar(palette, hasDraftText, group),
                 ],
               ),
             ),
@@ -481,8 +482,157 @@ class _GroupChatPageState extends State<GroupChatPage> {
     );
   }
 
-  Widget _buildInputBar(ChatPalette palette, bool hasDraftText) {
+  String _targetName() {
+    if (_targetContactId == null) return '';
+    try {
+      return controller.contactById(_targetContactId!).name;
+    } catch (_) {
+      return '未知';
+    }
+  }
+
+  Widget _buildTargetIndicator(ChatPalette palette) {
+    final ChatContact contact;
+    try {
+      contact = controller.contactById(_targetContactId!);
+    } catch (_) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: palette.accentColor.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          AvatarWidget(
+            size: 20,
+            fallbackColor: contact.avatarColor,
+            fallbackText: contact.emoji,
+            avatarUrl: contact.avatarUrl,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${contact.name} 将发言',
+            style: TextStyle(color: palette.primaryText, fontSize: 12),
+          ),
+          const Spacer(),
+          GestureDetector(
+            onTap: () => setState(() => _targetContactId = null),
+            child: Icon(
+              Icons.close_rounded,
+              size: 16,
+              color: palette.secondaryText,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAtPicker(ChatGroup group) {
+    final palette = ChatPalette.of(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: palette.surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                child: Row(
+                  children: [
+                    Text(
+                      '选择发言角色',
+                      style: TextStyle(
+                        color: palette.primaryText,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: palette.secondaryText,
+                        size: 20,
+                      ),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(color: palette.separatorColor, height: 1),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.4,
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: group.memberContactIds.length,
+                  itemBuilder: (listCtx, index) {
+                    final contactId = group.memberContactIds[index];
+                    final ChatContact contact;
+                    try {
+                      contact = controller.contactById(contactId);
+                    } catch (_) {
+                      return const SizedBox.shrink();
+                    }
+                    final selected = _targetContactId == contactId;
+                    return ListTile(
+                      leading: AvatarWidget(
+                        size: 36,
+                        fallbackColor: contact.avatarColor,
+                        fallbackText: contact.emoji,
+                        avatarUrl: contact.avatarUrl,
+                      ),
+                      title: Text(
+                        contact.name,
+                        style: TextStyle(
+                          color: selected
+                              ? palette.accentColor
+                              : palette.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      trailing: selected
+                          ? Icon(
+                              Icons.check_circle_rounded,
+                              color: palette.accentColor,
+                              size: 20,
+                            )
+                          : null,
+                      onTap: () {
+                        setState(() => _targetContactId = contactId);
+                        Navigator.pop(sheetCtx);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildInputBar(ChatPalette palette, bool hasDraftText, ChatGroup group) {
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    final isManual = !controller.isGroupRandomMode(widget.groupId);
+    final hintText = isManual
+        ? (_targetContactId != null
+            ? '对 ${_targetName()} 说…'
+            : '点 @ 选择发言角色')
+        : '发送消息…';
+
     return Container(
       decoration: BoxDecoration(
         color: palette.surfaceColor,
@@ -491,53 +641,108 @@ class _GroupChatPageState extends State<GroupChatPage> {
         ),
       ),
       padding: EdgeInsets.fromLTRB(12, 8, 12, bottomInset + 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: palette.inputSurface,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: palette.inputBorderColor),
-              ),
-              child: TextField(
-                controller: _inputController,
-                minLines: 1,
-                maxLines: 4,
-                style: TextStyle(color: palette.primaryText, fontSize: 15),
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _send(),
-                decoration: InputDecoration(
-                  hintText: '发送消息…',
-                  hintStyle: TextStyle(color: palette.secondaryText),
-                  border: InputBorder.none,
-                  isCollapsed: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 12),
+          if (isManual && _targetContactId != null)
+            _buildTargetIndicator(palette),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (isManual)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8, bottom: 2),
+                  child: GestureDetector(
+                    onTap: () => _showAtPicker(group),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: _targetContactId != null
+                            ? palette.accentColor.withValues(alpha: 0.2)
+                            : palette.inputSurface,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _targetContactId != null
+                              ? palette.accentColor.withValues(alpha: 0.4)
+                              : palette.inputBorderColor,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '@',
+                          style: TextStyle(
+                            color: _targetContactId != null
+                                ? palette.accentColor
+                                : palette.secondaryText,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: palette.inputSurface,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: palette.inputBorderColor),
+                  ),
+                  child: TextField(
+                    controller: _inputController,
+                    minLines: 1,
+                    maxLines: 4,
+                    style: TextStyle(color: palette.primaryText, fontSize: 15),
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                    onChanged: (text) {
+                      if (isManual && text.endsWith('@')) {
+                        // 用户手输 @ 也弹出选人
+                        final stripped =
+                            text.substring(0, text.length - 1);
+                        _inputController.value = TextEditingValue(
+                          text: stripped,
+                          selection: TextSelection.collapsed(
+                            offset: stripped.length,
+                          ),
+                        );
+                        _showAtPicker(group);
+                      }
+                    },
+                    decoration: InputDecoration(
+                      hintText: hintText,
+                      hintStyle: TextStyle(color: palette.secondaryText),
+                      border: InputBorder.none,
+                      isCollapsed: true,
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Material(
-            color: hasDraftText
-                ? palette.accentColor
-                : palette.accentColor.withValues(alpha: 0.3),
-            shape: const CircleBorder(),
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: hasDraftText ? _send : null,
-              child: const Padding(
-                padding: EdgeInsets.all(10),
-                child: Icon(
-                  Icons.arrow_upward_rounded,
-                  color: Colors.white,
-                  size: 22,
+              const SizedBox(width: 8),
+              Material(
+                color: hasDraftText
+                    ? palette.accentColor
+                    : palette.accentColor.withValues(alpha: 0.3),
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: hasDraftText ? _send : null,
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.arrow_upward_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ],
       ),
