@@ -320,9 +320,14 @@ class ChatAppController extends ChangeNotifier {
   }
 
   /// 群聊 AI 共用：构建最近的对话历史（OpenAI 格式）
+  /// 注意：过滤掉 contactId == groupId 的系统消息（建群/重置提示）
+  /// 否则 AI 会把它当成某个"旁白/系统"身份，之后模仿着返回非成员 name，匹配失败显示成群消息
   List<Map<String, dynamic>> _buildGroupHistory(String groupId) {
     final history = messagesFor(groupId)
-        .where((m) => m.body is WordMessageBody && !m.isHidden)
+        .where((m) =>
+            m.body is WordMessageBody &&
+            !m.isHidden &&
+            !(m.sender == ChatMessageSender.ai && m.contactId == groupId))
         .toList();
     final recent =
         history.length > 50 ? history.sublist(history.length - 50) : history;
