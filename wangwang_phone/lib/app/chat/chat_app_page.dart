@@ -12,7 +12,10 @@ import 'character_detail_page.dart';
 import 'chat_models.dart';
 import 'widgets/avatar_widget.dart';
 import 'widgets/chat_sidebar.dart';
+import 'widgets/group_avatar_widget.dart';
 import 'widgets/preset_widgets.dart';
+import 'pages/create_group_page.dart';
+import 'pages/group_chat_page.dart';
 import 'pages/persona_select_page.dart';
 import 'pages/preset_select_page.dart';
 
@@ -1040,7 +1043,7 @@ class AccountSettingsPage extends StatelessWidget {
   }
 }
 
-class _ChatThreadsTab extends StatelessWidget {
+class _ChatThreadsTab extends StatefulWidget {
   const _ChatThreadsTab({
     required this.controller,
     required this.onOpenConversation,
@@ -1050,45 +1053,471 @@ class _ChatThreadsTab extends StatelessWidget {
   final ValueChanged<ChatContact> onOpenConversation;
 
   @override
+  State<_ChatThreadsTab> createState() => _ChatThreadsTabState();
+}
+
+class _ChatThreadsTabState extends State<_ChatThreadsTab>
+    with TickerProviderStateMixin {
+  late final TabController _chatTabController;
+  final TextEditingController _friendSearchController = TextEditingController();
+  final TextEditingController _groupSearchController = TextEditingController();
+  String _friendSearchQuery = '';
+  String _groupSearchQuery = '';
+  int _currentSubTab = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _chatTabController = TabController(length: 2, vsync: this);
+    _chatTabController.addListener(() {
+      if (_chatTabController.index != _currentSubTab) {
+        setState(() => _currentSubTab = _chatTabController.index);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _chatTabController.dispose();
+    _friendSearchController.dispose();
+    _groupSearchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleAddPressed() async {
+    if (_currentSubTab == 1) {
+      await Navigator.of(context).push<ChatGroup>(
+        MaterialPageRoute(
+          builder: (_) => CreateGroupPage(controller: widget.controller),
+        ),
+      );
+      // 建群成功后 controller 会 notifyListeners，列表自动刷新
+    }
+    // 好友 tab 暂不接入任何动作
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final threadList = controller.threads;
     final palette = ChatPalette.of(context);
 
-    if (threadList.isEmpty) {
-      return ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        children: [
-          FrostPanel(
-            padding: const EdgeInsets.all(18),
-            borderRadius: 24,
-            child: Text(
-              '还没有会话，先去联系人里开启一段聊天吧。',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyLarge?.copyWith(color: palette.secondaryText),
-            ),
+    return Column(
+      children: [
+        // TabBar + 右侧 + 按钮
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 8, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: TabBar(
+                  controller: _chatTabController,
+                  tabs: const [
+                    Tab(text: '好友'),
+                    Tab(text: '群聊'),
+                  ],
+                  labelColor: palette.primaryText,
+                  unselectedLabelColor: palette.secondaryText,
+                  indicatorColor: palette.accentColor,
+                  indicatorSize: TabBarIndicatorSize.label,
+                  labelStyle: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                  unselectedLabelStyle: const TextStyle(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 15,
+                  ),
+                  dividerColor: Colors.transparent,
+                ),
+              ),
+              IconButton(
+                tooltip: _currentSubTab == 1 ? '创建群聊' : null,
+                icon: Icon(
+                  Icons.add_circle_outline,
+                  color: _currentSubTab == 1
+                      ? palette.accentColor
+                      : palette.secondaryText,
+                ),
+                onPressed: _handleAddPressed,
+              ),
+            ],
           ),
-        ],
-      );
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _chatTabController,
+            children: [
+              _buildFriendTab(palette),
+              _buildGroupTab(palette),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFriendTab(ChatPalette palette) {
+    // 取好友 thread + 搜索过滤
+    var threads = widget.controller.friendThreads.toList();
+    if (_friendSearchQuery.isNotEmpty) {
+      threads = threads.where((t) {
+        try {
+          final contact = widget.controller.contactById(t.contactId);
+          return contact.name.contains(_friendSearchQuery);
+        } catch (_) {
+          return false;
+        }
+      }).toList();
+    }
+    // 置顶在前；同组内按名字字典序排
+    threads.sort((a, b) {
+      if (a.isPinned != b.isPinned) {
+        return a.isPinned ? -1 : 1;
+      }
+      String nameOf(ChatThread t) {
+        try {
+          return widget.controller.contactById(t.contactId).name;
+        } catch (_) {
+          return t.contactId;
+        }
+      }
+      return nameOf(a).compareTo(nameOf(b));
+    });
+
+    return Column(
+      children: [
+        _buildSearchBar(
+          palette: palette,
+          controller: _friendSearchController,
+          hint: '搜索好友…',
+          onChanged: (v) => setState(() => _friendSearchQuery = v),
+        ),
+        Expanded(
+          child: threads.isEmpty
+              ? _buildEmptyHint(
+                  palette,
+                  _friendSearchQuery.isNotEmpty
+                      ? '没有匹配的好友'
+                      : '还没有会话，先去联系人里开启一段聊天吧。',
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                  itemCount: threads.length,
+                  itemBuilder: (context, index) {
+                    final thread = threads[index];
+                    final ChatContact contact;
+                    try {
+                      contact = widget.controller.contactById(thread.contactId);
+                    } catch (_) {
+                      return const SizedBox.shrink();
+                    }
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == threads.length - 1 ? 0 : 6,
+                      ),
+                      child: _ChatThreadTile(
+                        contact: contact,
+                        thread: thread,
+                        onTap: widget.onOpenConversation,
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGroupTab(ChatPalette palette) {
+    var threads = widget.controller.groupThreads.toList();
+    if (_groupSearchQuery.isNotEmpty) {
+      threads = threads.where((t) {
+        try {
+          final group = widget.controller.groupById(t.groupId!);
+          return group.name.contains(_groupSearchQuery);
+        } catch (_) {
+          return false;
+        }
+      }).toList();
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
-      itemCount: threadList.length,
-      itemBuilder: (context, index) {
-        final thread = threadList[index];
-        final contact = controller.contactById(thread.contactId);
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: index == threadList.length - 1 ? 0 : 6,
+    return Column(
+      children: [
+        _buildSearchBar(
+          palette: palette,
+          controller: _groupSearchController,
+          hint: '搜索群聊…',
+          onChanged: (v) => setState(() => _groupSearchQuery = v),
+        ),
+        Expanded(
+          child: threads.isEmpty
+              ? _buildGroupEmptyState(palette)
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                  itemCount: threads.length,
+                  itemBuilder: (context, index) {
+                    final thread = threads[index];
+                    final ChatGroup group;
+                    try {
+                      group = widget.controller.groupById(thread.groupId!);
+                    } catch (_) {
+                      return const SizedBox.shrink();
+                    }
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == threads.length - 1 ? 0 : 6,
+                      ),
+                      child: _GroupThreadTile(
+                        controller: widget.controller,
+                        group: group,
+                        thread: thread,
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => GroupChatPage(
+                                controller: widget.controller,
+                                groupId: group.id,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSearchBar({
+    required ChatPalette palette,
+    required TextEditingController controller,
+    required String hint,
+    required ValueChanged<String> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        style: TextStyle(color: palette.primaryText, fontSize: 14),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(color: palette.secondaryText, fontSize: 14),
+          prefixIcon: Icon(Icons.search, size: 20, color: palette.secondaryText),
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+          filled: true,
+          fillColor: palette.threadSurface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(20),
+            borderSide: BorderSide.none,
           ),
-          child: _ChatThreadTile(
-            contact: contact,
-            thread: thread,
-            onTap: onOpenConversation,
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(20),
+            borderSide: BorderSide.none,
           ),
-        );
-      },
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(20),
+            borderSide: BorderSide(color: palette.accentColor.withValues(alpha: 0.4)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyHint(ChatPalette palette, String text) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      children: [
+        FrostPanel(
+          padding: const EdgeInsets.all(18),
+          borderRadius: 24,
+          child: Text(
+            text,
+            style: Theme.of(context)
+                .textTheme
+                .bodyLarge
+                ?.copyWith(color: palette.secondaryText),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGroupEmptyState(ChatPalette palette) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.group_add, size: 48, color: palette.secondaryText.withValues(alpha: 0.5)),
+          const SizedBox(height: 12),
+          Text(
+            _groupSearchQuery.isNotEmpty ? '没有匹配的群聊' : '还没有群聊',
+            style: TextStyle(color: palette.secondaryText, fontSize: 14),
+          ),
+          if (_groupSearchQuery.isEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              '点击右上角 + 创建群聊',
+              style: TextStyle(
+                color: palette.secondaryText.withValues(alpha: 0.7),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _GroupThreadTile extends StatelessWidget {
+  const _GroupThreadTile({
+    required this.controller,
+    required this.group,
+    required this.thread,
+    required this.onTap,
+  });
+
+  final ChatAppController controller;
+  final ChatGroup group;
+  final ChatThread thread;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+    final hasUnread = thread.unreadCount > 0;
+    final timeColor = hasUnread ? palette.accentColor : palette.secondaryText;
+    final previewColor =
+        hasUnread ? palette.primaryText : palette.secondaryText;
+    final borderColor = thread.isPinned
+        ? palette.accentColor.withValues(alpha: 0.14)
+        : palette.threadDividerColor;
+    final tileColor =
+        thread.isPinned ? palette.threadPinnedSurface : palette.threadSurface;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: Key('chat_group_${group.id}'),
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: tileColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: borderColor),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                GroupAvatarWidget(
+                  group: group,
+                  controller: controller,
+                  size: 48,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${group.name}(${group.memberContactIds.length})',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(
+                                    color: palette.primaryText,
+                                    fontWeight: hasUnread
+                                        ? FontWeight.w800
+                                        : FontWeight.w700,
+                                  ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            _formatThreadTime(thread.updatedAt),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: timeColor,
+                                  fontWeight: hasUnread
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              thread.lastMessage,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: previewColor,
+                                    fontWeight: hasUnread
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    height: 1.2,
+                                  ),
+                            ),
+                          ),
+                          if (hasUnread) const SizedBox(width: 10),
+                          if (hasUnread)
+                            Container(
+                              constraints: const BoxConstraints(
+                                minWidth: 22,
+                                minHeight: 22,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: palette.unreadBadgeColor,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                thread.unreadCount > 99
+                                    ? '99+'
+                                    : '${thread.unreadCount}',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -78,6 +78,7 @@ class ChatThread {
     required this.updatedAt,
     this.unreadCount = 0,
     this.isPinned = false,
+    this.groupId,
   });
 
   final String contactId;
@@ -85,12 +86,16 @@ class ChatThread {
   final DateTime updatedAt;
   final int unreadCount;
   final bool isPinned;
+  final String? groupId;
+
+  bool get isGroup => groupId != null;
 
   ChatThread copyWith({
     String? lastMessage,
     DateTime? updatedAt,
     int? unreadCount,
     bool? isPinned,
+    String? groupId,
   }) {
     return ChatThread(
       contactId: contactId,
@@ -98,6 +103,33 @@ class ChatThread {
       updatedAt: updatedAt ?? this.updatedAt,
       unreadCount: unreadCount ?? this.unreadCount,
       isPinned: isPinned ?? this.isPinned,
+      groupId: groupId ?? this.groupId,
+    );
+  }
+}
+
+class ChatGroup {
+  const ChatGroup({
+    required this.id,
+    required this.name,
+    required this.memberContactIds,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String name;
+  final List<String> memberContactIds;
+  final DateTime createdAt;
+
+  ChatGroup copyWith({
+    String? name,
+    List<String>? memberContactIds,
+  }) {
+    return ChatGroup(
+      id: id,
+      name: name ?? this.name,
+      memberContactIds: memberContactIds ?? this.memberContactIds,
+      createdAt: createdAt,
     );
   }
 }
@@ -310,4 +342,5 @@ class ChatSeedData {
   static final diaries = <ChatDiaryEntry>[];
   static final thoughts = <ChatThoughtEntry>[];
   static final systemEntries = <ChatSystemEntry>[];
+  static final groups = <String, ChatGroup>{};
 }

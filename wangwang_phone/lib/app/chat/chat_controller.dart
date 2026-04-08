@@ -98,7 +98,10 @@ class ChatAppController extends ChangeNotifier {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       for (final entry in data.entries) {
         final contactId = entry.key;
-        if (!_messages.containsKey(contactId)) continue;
+        if (!_messages.containsKey(contactId)) {
+          // 群聊消息：恢复时 _messages 里可能还没有这个 groupId 的 key
+          _messages[contactId] = [];
+        }
         final msgs = (entry.value as List).map((m) {
           final altList = (m['alternatives'] as List?)
                   ?.map<ChatMessageBody>(
@@ -124,6 +127,545 @@ class ChatAppController extends ChangeNotifier {
     } catch (_) {}
   }
 
+  // ===== 群聊：建群、持久化 =====
+  ChatGroup createGroup({
+    required String name,
+    required List<String> memberContactIds,
+  }) {
+    final now = DateTime.now();
+    final groupId = 'group_${now.microsecondsSinceEpoch}';
+
+    final group = ChatGroup(
+      id: groupId,
+      name: name.trim(),
+      memberContactIds: List<String>.from(memberContactIds),
+      createdAt: now,
+    );
+    _groups[groupId] = group;
+
+    _threads[groupId] = ChatThread(
+      contactId: groupId,
+      lastMessage: '群聊已创建',
+      updatedAt: now,
+      groupId: groupId,
+    );
+
+    _messages[groupId] = [
+      ChatMessage(
+        id: '$groupId-${now.microsecondsSinceEpoch}',
+        contactId: groupId,
+        sender: ChatMessageSender.ai,
+        body: WordMessageBody('群聊「${name.trim()}」已创建，开始聊天吧'),
+        sentAt: now,
+      ),
+    ];
+
+    notifyListeners();
+    _saveGroups();
+    return group;
+  }
+
+  Future<void> _saveGroups() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/wangwang_groups.json');
+      final data = <String, dynamic>{};
+      for (final entry in _groups.entries) {
+        data[entry.key] = {
+          'id': entry.value.id,
+          'name': entry.value.name,
+          'memberContactIds': entry.value.memberContactIds,
+          'createdAt': entry.value.createdAt.toIso8601String(),
+        };
+      }
+      await file.writeAsString(jsonEncode(data));
+    } catch (_) {}
+  }
+
+  bool isGroupRandomMode(String groupId) => _groupRandomMode[groupId] ?? true;
+
+  void toggleGroupMode(String groupId) {
+    _groupRandomMode[groupId] = !isGroupRandomMode(groupId);
+    notifyListeners();
+  }
+
+  String? getGroupError(String groupId) => _groupError[groupId];
+
+  void clearGroupError(String groupId) {
+    if (_groupError.remove(groupId) != null) {
+      notifyListeners();
+    }
+  }
+
+  /// 重置群聊对话：清空消息，可选清掉记忆/摘要
+  void resetGroupChat({
+    required String groupId,
+    required bool clearMemory,
+  }) {
+    final group = _groups[groupId];
+    if (group == null) return;
+
+    final now = DateTime.now();
+    _messages[groupId] = [
+      ChatMessage(
+        id: '$groupId-reset-${now.microsecondsSinceEpoch}',
+        contactId: groupId,
+        sender: ChatMessageSender.ai,
+        body: WordMessageBody('对话已重置'),
+        sentAt: now,
+      ),
+    ];
+
+    final existingThread = _threads[groupId];
+    if (existingThread != null) {
+      _threads[groupId] = existingThread.copyWith(
+        lastMessage: '对话已重置',
+        updatedAt: now,
+        unreadCount: 0,
+      );
+    }
+
+    if (clearMemory) {
+      _summaries.remove(groupId);
+      _memories.removeWhere((m) => m.contactId == groupId);
+    }
+
+    _groupError.remove(groupId);
+    notifyListeners();
+    _saveMessages();
+  }
+
+  /// 解散群聊：彻底清除群组及其所有相关数据
+  void disbandGroup({required String groupId}) {
+    _groups.remove(groupId);
+    _threads.remove(groupId);
+    _messages.remove(groupId);
+    _summaries.remove(groupId);
+    _memories.removeWhere((m) => m.contactId == groupId);
+    _groupError.remove(groupId);
+    _groupRandomMode.remove(groupId);
+
+    notifyListeners();
+    _saveGroups();
+    _saveMessages();
+  }
+
+  /// 群聊发消息 / 召唤角色发言。
+  /// - 随机模式 + summonOnly=false：追加用户消息 → 自动触发 AI 接力（步骤 8 接入）
+  /// - 手动模式 + summonOnly=false：只追加用户消息，不触发 AI，等召唤
+  /// - summonOnly=true：不追加用户消息，触发 targetContactId 角色发言（步骤 8 接入）
+  Future<void> sendGroupMessage({
+    required String groupId,
+    required String text,
+    String? targetContactId,
+    bool summonOnly = false,
+  }) async {
+    final group = _groups[groupId];
+    if (group == null) return;
+
+    if (!summonOnly) {
+      final trimmed = text.trim();
+      if (trimmed.isEmpty) return;
+
+      final now = DateTime.now();
+      _appendMessage(
+        contactId: groupId,
+        message: ChatMessage(
+          id: '$groupId-${now.microsecondsSinceEpoch}',
+          contactId: groupId,
+          sender: ChatMessageSender.user,
+          body: WordMessageBody(trimmed),
+          sentAt: now,
+        ),
+        unreadCount: 0,
+      );
+      await _saveMessages();
+    }
+
+    final isRandom = isGroupRandomMode(groupId);
+    final shouldCallAi =
+        (isRandom && !summonOnly) || (summonOnly && targetContactId != null);
+    if (!shouldCallAi) return;
+
+    if (!isApiConfigured) {
+      _appendGroupFallbackReply(
+        groupId,
+        '【未配置接口】请先在"我"页面设置 API 接口和密钥。',
+      );
+      return;
+    }
+
+    _typingContacts.add(groupId);
+    _groupError.remove(groupId);
+    notifyListeners();
+
+    try {
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 5);
+      dio.options.receiveTimeout = const Duration(seconds: 120);
+
+      if (isRandom && !summonOnly) {
+        await _sendGroupRandomReply(dio, groupId, group);
+      } else if (summonOnly && targetContactId != null) {
+        await _sendGroupManualReply(dio, groupId, group, targetContactId);
+      }
+      await _saveMessages();
+    } catch (e) {
+      _groupError[groupId] = '$e';
+      _appendGroupFallbackReply(groupId, '【信号中断】$e');
+    } finally {
+      _typingContacts.remove(groupId);
+      notifyListeners();
+    }
+  }
+
+  /// 群聊 AI 共用：构建最近的对话历史（OpenAI 格式）
+  /// 注意：过滤掉 contactId == groupId 的系统消息（建群/重置提示）
+  /// 否则 AI 会把它当成某个"旁白/系统"身份，之后模仿着返回非成员 name，匹配失败显示成群消息
+  List<Map<String, dynamic>> _buildGroupHistory(String groupId) {
+    final history = messagesFor(groupId)
+        .where((m) =>
+            m.body is WordMessageBody &&
+            !m.isHidden &&
+            !(m.sender == ChatMessageSender.ai && m.contactId == groupId))
+        .toList();
+    final recent =
+        history.length > 50 ? history.sublist(history.length - 50) : history;
+    return [
+      for (final m in recent)
+        {
+          'role': m.sender == ChatMessageSender.user ? 'user' : 'assistant',
+          'content': (m.body as WordMessageBody).text,
+        },
+    ];
+  }
+
+  /// 群聊 AI 共用：发请求并取出纯文本回复（兼容 claude / openai 格式）
+  Future<String> _callGroupChatApi({
+    required Dio dio,
+    required String systemPrompt,
+    required List<Map<String, dynamic>> historyMessages,
+    required int maxTokens,
+  }) async {
+    final provider = currentApiProvider!;
+    final Map<String, dynamic> requestData;
+    final Map<String, String> requestHeaders;
+
+    if (_apiProviderId == 'claude') {
+      requestHeaders = {
+        'Content-Type': 'application/json',
+        'x-api-key': _apiKey,
+        'anthropic-version': '2023-06-01',
+      };
+      requestData = {
+        'model': _apiModelId,
+        'max_tokens': maxTokens,
+        'system': systemPrompt,
+        'messages': historyMessages,
+      };
+    } else {
+      requestHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $_apiKey',
+      };
+      requestData = {
+        'model': _apiModelId,
+        'messages': [
+          {'role': 'system', 'content': systemPrompt},
+          ...historyMessages,
+        ],
+        'max_tokens': maxTokens,
+        'stream': false,
+      };
+    }
+
+    final response = await dio.post(
+      provider.baseUrl,
+      options: Options(headers: requestHeaders),
+      data: requestData,
+    );
+
+    if (_apiProviderId == 'claude') {
+      final content = response.data['content'] as List;
+      return content
+          .where((block) => block['type'] == 'text')
+          .map((block) => block['text'] as String)
+          .join('\n');
+    } else {
+      return response.data['choices'][0]['message']['content'] as String;
+    }
+  }
+
+  /// 拉指定角色的角色卡，拼成一段 persona 文本
+  Future<String> _fetchCharacterPersona(Dio dio, ChatContact contact) async {
+    try {
+      final res = await dio.get(
+        '$kBridgeHost/characters/${Uri.encodeComponent(contact.name)}',
+      );
+      final d = res.data;
+      final desc =
+          _replacePlaceholders((d['description'] as String?) ?? '', contact.name);
+      final personality = _replacePlaceholders(
+          (d['personality'] as String?) ?? '', contact.name);
+      final scenario =
+          _replacePlaceholders((d['scenario'] as String?) ?? '', contact.name);
+      return [
+        if (desc.isNotEmpty) desc,
+        if (personality.isNotEmpty) '性格：$personality',
+        if (scenario.isNotEmpty) '场景：$scenario',
+      ].join('\n');
+    } catch (_) {
+      return contact.personaSummary.isNotEmpty
+          ? contact.personaSummary
+          : '${contact.name}：来自酒馆的角色';
+    }
+  }
+
+  /// 随机接力 AI 回复：一次 API 调用，AI 决定哪些角色回复
+  Future<void> _sendGroupRandomReply(
+    Dio dio,
+    String groupId,
+    ChatGroup group,
+  ) async {
+    // 拉所有成员的简要 persona
+    final memberProfiles = <String>[];
+    for (final cid in group.memberContactIds) {
+      try {
+        final c = contactById(cid);
+        final persona = await _fetchCharacterPersona(dio, c);
+        memberProfiles.add('【${c.name}】\n$persona');
+      } catch (_) {}
+    }
+
+    final memberCount = group.memberContactIds.length;
+    final replyCountHint = memberCount <= 5
+        ? '1-2个角色'
+        : memberCount <= 10
+            ? '1-3个角色'
+            : '2-3个角色';
+
+    final systemPrompt = '''你是一个群聊模拟器。这个群聊叫「${group.name}」，有$memberCount位成员。
+
+以下是每位成员的角色设定：
+${memberProfiles.join('\n\n')}
+
+你的任务：
+1. 根据用户的最新消息和对话上下文，决定哪些角色会回复（选$replyCountHint）
+2. 只选和当前话题相关、有动机发言的角色
+3. 每个角色的回复要符合其性格和说话风格
+4. 回复要自然口语化，像真的群聊一样
+
+你必须且只能返回以下格式的 JSON 数组，不要返回任何其他内容：
+[{"name":"角色名","reply":"回复内容"},{"name":"角色名","reply":"回复内容"}]
+
+不要添加任何解释、前缀或 markdown 格式（不要 ```json 包裹），直接返回 JSON 数组。''';
+
+    final history = _buildGroupHistory(groupId);
+    final rawReply = await _callGroupChatApi(
+      dio: dio,
+      systemPrompt: systemPrompt,
+      historyMessages: history,
+      maxTokens: 2000,
+    );
+
+    // 解析 JSON 数组（AI 可能在前后塞废话 / markdown / 换行）
+    List<dynamic>? replies;
+    try {
+      var cleaned = rawReply
+          .replaceAll(RegExp(r'```json\s*'), '')
+          .replaceAll(RegExp(r'```\s*'), '')
+          .trim();
+      final match = RegExp(r'\[[\s\S]*\]').firstMatch(cleaned);
+      if (match != null) {
+        replies = jsonDecode(match.group(0)!) as List<dynamic>;
+      } else {
+        replies = jsonDecode(cleaned) as List<dynamic>;
+      }
+    } catch (_) {
+      replies = null;
+    }
+
+    if (replies == null || replies.isEmpty) {
+      _appendGroupFallbackReply(groupId, rawReply);
+      return;
+    }
+
+    int appendedCount = 0;
+    for (final entry in replies) {
+      if (entry is! Map) continue;
+      final name = (entry['name'] ?? '').toString().trim();
+      final replyText = (entry['reply'] ?? '').toString().trim();
+      if (name.isEmpty || replyText.isEmpty) continue;
+
+      final replyContactId = _matchGroupMember(group, name);
+      if (replyContactId == null) {
+        // AI 幻觉：返回了群里不存在的角色名，丢弃该条避免显示成"群消息"
+        debugPrint('[group-ai] 跳过未知角色: "$name"');
+        continue;
+      }
+
+      final ts = DateTime.now();
+      _appendMessage(
+        contactId: groupId,
+        message: ChatMessage(
+          id: '$groupId-$replyContactId-${ts.microsecondsSinceEpoch}',
+          contactId: replyContactId,
+          sender: ChatMessageSender.ai,
+          body: WordMessageBody(replyText),
+          sentAt: ts,
+        ),
+        unreadCount: 0,
+      );
+      appendedCount++;
+
+      // 让接力有节奏感
+      await Future.delayed(const Duration(milliseconds: 300));
+      notifyListeners();
+    }
+
+    // 所有条目都匹不上群成员 → 退回把原文显示成系统回复，不让用户什么都看不到
+    if (appendedCount == 0) {
+      _appendGroupFallbackReply(groupId, rawReply);
+    }
+  }
+
+  /// 把 AI 返回的角色名映射到群成员 contactId。
+  /// 策略：精确 → 归一化精确 → 归一化双向包含。归一化会去掉常见标点/括号/空白。
+  String? _matchGroupMember(ChatGroup group, String name) {
+    // 第一轮：原样精确匹配
+    for (final cid in group.memberContactIds) {
+      try {
+        if (contactById(cid).name == name) return cid;
+      } catch (_) {}
+    }
+
+    final normalizedTarget = _normalizeContactName(name);
+    if (normalizedTarget.isEmpty) return null;
+
+    // 第二轮：归一化后精确匹配
+    for (final cid in group.memberContactIds) {
+      try {
+        if (_normalizeContactName(contactById(cid).name) == normalizedTarget) {
+          return cid;
+        }
+      } catch (_) {}
+    }
+
+    // 第三轮：归一化后双向包含
+    for (final cid in group.memberContactIds) {
+      try {
+        final normalizedMember =
+            _normalizeContactName(contactById(cid).name);
+        if (normalizedMember.isEmpty) continue;
+        if (normalizedMember.contains(normalizedTarget) ||
+            normalizedTarget.contains(normalizedMember)) {
+          return cid;
+        }
+      } catch (_) {}
+    }
+
+    return null;
+  }
+
+  /// 归一化角色名：去掉空白、各种括号、引号、标点
+  String _normalizeContactName(String input) {
+    return input
+        .replaceAll(RegExp(r'\s+'), '')
+        .replaceAll(RegExp(r'[\[\](){}【】《》（）「」『』<>]'), '')
+        .replaceAll(RegExp('[\'"`\u2018\u2019\u201C\u201D]'), '')
+        .replaceAll(RegExp(r'[~!@#$%^&*_=+|/?.,;:\-]'), '')
+        .toLowerCase();
+  }
+
+  /// 手动召唤：只调一个角色
+  Future<void> _sendGroupManualReply(
+    Dio dio,
+    String groupId,
+    ChatGroup group,
+    String targetContactId,
+  ) async {
+    final ChatContact contact;
+    try {
+      contact = contactById(targetContactId);
+    } catch (_) {
+      _appendGroupFallbackReply(groupId, '【召唤失败】角色不存在');
+      return;
+    }
+
+    final personaText = await _fetchCharacterPersona(dio, contact);
+    final systemPrompt = personaText.isNotEmpty
+        ? '你正在群聊「${group.name}」里扮演 ${contact.name}。\n\n$personaText\n\n请用 ${contact.name} 的语气和性格自然地回复群里的最新消息，简短自然。'
+        : '你是 ${contact.name}，正在群聊「${group.name}」里发言。请用自然的语气回复群里的最新消息。';
+
+    final history = _buildGroupHistory(groupId);
+    final rawReply = await _callGroupChatApi(
+      dio: dio,
+      systemPrompt: systemPrompt,
+      historyMessages: history,
+      maxTokens: 800,
+    );
+    final cleaned = _replacePlaceholders(rawReply, contact.name).trim();
+
+    final ts = DateTime.now();
+    _appendMessage(
+      contactId: groupId,
+      message: ChatMessage(
+        id: '$groupId-$targetContactId-${ts.microsecondsSinceEpoch}',
+        contactId: targetContactId,
+        sender: ChatMessageSender.ai,
+        body: WordMessageBody(cleaned),
+        sentAt: ts,
+      ),
+      unreadCount: 0,
+    );
+  }
+
+  void _appendGroupFallbackReply(String groupId, String text) {
+    final ts = DateTime.now();
+    _appendMessage(
+      contactId: groupId,
+      message: ChatMessage(
+        id: '$groupId-fallback-${ts.microsecondsSinceEpoch}',
+        contactId: groupId,
+        sender: ChatMessageSender.ai,
+        body: WordMessageBody(text),
+        sentAt: ts,
+      ),
+      unreadCount: 0,
+    );
+  }
+
+  Future<void> loadPersistedGroups() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/wangwang_groups.json');
+      if (!await file.exists()) return;
+      final raw = await file.readAsString();
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      for (final entry in data.entries) {
+        final g = entry.value;
+        final group = ChatGroup(
+          id: g['id'],
+          name: g['name'],
+          memberContactIds: List<String>.from(g['memberContactIds']),
+          createdAt: DateTime.parse(g['createdAt']),
+        );
+        _groups[group.id] = group;
+
+        if (!_threads.containsKey(group.id)) {
+          _threads[group.id] = ChatThread(
+            contactId: group.id,
+            lastMessage: '群聊已创建',
+            updatedAt: group.createdAt,
+            groupId: group.id,
+          );
+          _messages[group.id] ??= [];
+        }
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
+
   final List<ChatContact> _contacts;
   final Map<String, ChatThread> _threads;
   final Map<String, List<ChatMessage>> _messages;
@@ -141,6 +683,9 @@ class ChatAppController extends ChangeNotifier {
   final ChatSummaryStore _summaryStore;
   final Set<String> _typingContacts = <String>{};
   final Map<String, ChatContextBundle> _lastContextBundles = {};
+  final Map<String, ChatGroup> _groups = {};
+  final Map<String, bool> _groupRandomMode = {}; // groupId -> true=随机, false=手动；默认 true
+  final Map<String, String> _groupError = {}; // groupId -> 最近一次 AI 调用错误
   ChatBubbleAppearance _bubbleAppearance;
   List<Map<String, dynamic>> _personas = [];
   String _globalPersonaId = '';
@@ -265,6 +810,38 @@ class ChatAppController extends ChangeNotifier {
     return List<ChatThread>.unmodifiable(sortedThreads);
   }
 
+  List<ChatThread> get friendThreads {
+    final items = _threads.values.where((t) => !t.isGroup).toList()
+      ..sort((left, right) {
+        if (left.isPinned != right.isPinned) {
+          return left.isPinned ? -1 : 1;
+        }
+        return right.updatedAt.compareTo(left.updatedAt);
+      });
+    return List<ChatThread>.unmodifiable(items);
+  }
+
+  List<ChatThread> get groupThreads {
+    final items = _threads.values.where((t) => t.isGroup).toList()
+      ..sort((left, right) {
+        if (left.isPinned != right.isPinned) {
+          return left.isPinned ? -1 : 1;
+        }
+        return right.updatedAt.compareTo(left.updatedAt);
+      });
+    return List<ChatThread>.unmodifiable(items);
+  }
+
+  List<ChatGroup> get groups {
+    final items = _groups.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return List<ChatGroup>.unmodifiable(items);
+  }
+
+  ChatGroup groupById(String groupId) {
+    return _groups[groupId]!;
+  }
+
   ChatContact contactById(String contactId) {
     return _contacts.firstWhere((contact) => contact.id == contactId);
   }
@@ -300,7 +877,7 @@ Future<void> syncContactsFromBridge() async {
     final List<dynamic> list = res.data;
 
     _contacts.clear();
-    _threads.clear();
+    _threads.removeWhere((key, thread) => !thread.isGroup);
     _moments.clear();
 
     final now = DateTime.now();
@@ -349,7 +926,8 @@ Future<void> syncContactsFromBridge() async {
     }
 
     notifyListeners();
-    await loadPersistedMessages(); // 加这一行，在同步角色之后再恢复消息
+    await loadPersistedGroups();   // 先恢复群组：建好 _messages[groupId] 容器
+    await loadPersistedMessages(); // 再恢复消息：群消息能找到对应 key
   } catch (e) {
     // 桥接服务连不上就保留原来的联系人
   }

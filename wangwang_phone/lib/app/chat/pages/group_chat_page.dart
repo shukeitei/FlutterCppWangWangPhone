@@ -1,0 +1,1059 @@
+import 'package:flutter/material.dart';
+
+import '../character_detail_page.dart';
+import '../chat_app_page.dart';
+import '../chat_controller.dart';
+import '../chat_message_payloads.dart';
+import '../chat_models.dart';
+import '../widgets/avatar_widget.dart';
+import '../widgets/group_avatar_widget.dart';
+import 'persona_select_page.dart';
+import 'preset_select_page.dart';
+
+class GroupChatPage extends StatefulWidget {
+  const GroupChatPage({
+    super.key,
+    required this.controller,
+    required this.groupId,
+  });
+
+  final ChatAppController controller;
+  final String groupId;
+
+  @override
+  State<GroupChatPage> createState() => _GroupChatPageState();
+}
+
+class _GroupChatPageState extends State<GroupChatPage> {
+  final TextEditingController _inputController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  bool _waitingForSummon = false; // 手动模式下，发完消息后等待召唤
+
+  ChatAppController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _inputController.addListener(_onInputChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      controller.openConversation(widget.groupId);
+      _scrollToBottom();
+    });
+  }
+
+  @override
+  void dispose() {
+    controller.closeConversation(widget.groupId);
+    _inputController.removeListener(_onInputChanged);
+    _inputController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onInputChanged() {
+    // 切回随机模式时，召唤条不再有意义
+    if (controller.isGroupRandomMode(widget.groupId) && _waitingForSummon) {
+      _waitingForSummon = false;
+    }
+    setState(() {});
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  void _showMemberList(ChatGroup group) {
+    final palette = ChatPalette.of(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: palette.surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                child: Row(
+                  children: [
+                    Text(
+                      '群成员 (${group.memberContactIds.length})',
+                      style: TextStyle(
+                        color: palette.primaryText,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: palette.secondaryText,
+                        size: 20,
+                      ),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(color: palette.separatorColor, height: 1),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.5,
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: group.memberContactIds.length,
+                  itemBuilder: (listCtx, index) {
+                    final contactId = group.memberContactIds[index];
+                    final ChatContact contact;
+                    try {
+                      contact = controller.contactById(contactId);
+                    } catch (_) {
+                      return const SizedBox.shrink();
+                    }
+                    return ListTile(
+                      leading: AvatarWidget(
+                        size: 40,
+                        fallbackColor: contact.avatarColor,
+                        fallbackText: contact.emoji,
+                        avatarUrl: contact.avatarUrl,
+                      ),
+                      title: Text(
+                        contact.name,
+                        style: TextStyle(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        contact.signature,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: palette.secondaryText,
+                          fontSize: 12,
+                        ),
+                      ),
+                      onTap: () {
+                        Navigator.pop(sheetCtx);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => CharacterDetailPage(
+                              controller: controller,
+                              contact: contact,
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _send() {
+    final text = _inputController.text.trim();
+    if (text.isEmpty) return;
+    final isManual = !controller.isGroupRandomMode(widget.groupId);
+    controller.sendGroupMessage(groupId: widget.groupId, text: text);
+    _inputController.clear();
+    _scrollToBottom();
+    if (isManual) {
+      setState(() => _waitingForSummon = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        // 群组可能在外部被删除，这里要安全 fallback
+        final ChatGroup group;
+        try {
+          group = controller.groupById(widget.groupId);
+        } catch (_) {
+          return Scaffold(
+            backgroundColor: palette.pageBackground,
+            body: Center(
+              child: Text(
+                '群聊已不存在',
+                style: TextStyle(color: palette.secondaryText),
+              ),
+            ),
+          );
+        }
+        final messages = controller.messagesFor(widget.groupId);
+        final hasDraftText = _inputController.text.trim().isNotEmpty;
+
+        return Scaffold(
+          key: _scaffoldKey,
+          backgroundColor: palette.pageBackground,
+          endDrawer: _buildGroupDrawer(palette, group),
+          body: Container(
+            color: palette.pageBackground,
+            child: SafeArea(
+              bottom: false,
+              child: Column(
+                children: [
+                  _buildHeader(palette, group),
+                  if (controller.getGroupError(widget.groupId) != null)
+                    _buildErrorBanner(palette),
+                  Expanded(
+                    child: messages.isEmpty
+                        ? Center(
+                            child: Text(
+                              '还没有消息',
+                              style: TextStyle(color: palette.secondaryText),
+                            ),
+                          )
+                        : ListView.builder(
+                            controller: _scrollController,
+                            padding:
+                                const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                            itemCount: messages.length,
+                            itemBuilder: (context, index) {
+                              return _buildMessageItem(palette, messages[index]);
+                            },
+                          ),
+                  ),
+                  if (controller.isTyping(widget.groupId))
+                    _buildTypingIndicator(palette),
+                  _buildInputBar(palette, hasDraftText, group),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHeader(ChatPalette palette, ChatGroup group) {
+    return Container(
+      decoration: BoxDecoration(
+        color: palette.surfaceColor,
+        border: Border(
+          bottom: BorderSide(color: palette.separatorColor),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: palette.primaryText,
+              size: 18,
+            ),
+            onPressed: () => Navigator.of(context).maybePop(),
+          ),
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _showMemberList(group),
+              child: Row(
+                children: [
+                  GroupAvatarWidget(
+                    group: group,
+                    controller: controller,
+                    size: 40,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          group.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(
+                                color: palette.primaryText,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${group.memberContactIds.length} 位成员',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: palette.secondaryText,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: controller.isGroupRandomMode(widget.groupId)
+                ? '随机接力模式'
+                : '手动指定模式',
+            icon: Icon(
+              controller.isGroupRandomMode(widget.groupId)
+                  ? Icons.flash_on_rounded
+                  : Icons.flash_off_rounded,
+              color: controller.isGroupRandomMode(widget.groupId)
+                  ? const Color(0xFFFFC65C)
+                  : palette.secondaryText,
+            ),
+            onPressed: () {
+              controller.toggleGroupMode(widget.groupId);
+              final mode = controller.isGroupRandomMode(widget.groupId)
+                  ? '随机接力'
+                  : '手动指定';
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('已切换为 $mode 模式'),
+                  duration: const Duration(seconds: 1),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            tooltip: '群聊设置',
+            icon: Icon(
+              Icons.tune_rounded,
+              color: palette.primaryText,
+            ),
+            onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageItem(ChatPalette palette, ChatMessage message) {
+    final isUser = message.sender == ChatMessageSender.user;
+    final body = message.activeBody;
+    final text =
+        body is WordMessageBody ? body.text : message.previewText;
+    final bubble = controller.bubbleAppearance;
+
+    if (isUser) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(width: 56),
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: bubble.userBubbleColor,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Text(
+                  text,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // AI/系统消息：左侧带角色头像 + 名字
+    // 当前 message.contactId 有两种情况：
+    //   1) 系统消息：contactId == groupId（建群提示）
+    //   2) 后续多角色回复：contactId == 具体角色 id
+    ChatContact? authorContact;
+    if (message.contactId != widget.groupId) {
+      try {
+        authorContact = controller.contactById(message.contactId);
+      } catch (_) {}
+    }
+    final authorName = authorContact?.name ?? '群消息';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (authorContact != null)
+            AvatarWidget(
+              size: 32,
+              fallbackColor: authorContact.avatarColor,
+              fallbackText: authorContact.emoji,
+              avatarUrl: authorContact.avatarUrl,
+            )
+          else
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: palette.elevatedSurface,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(
+                Icons.smart_toy_rounded,
+                size: 18,
+                color: palette.secondaryText,
+              ),
+            ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, bottom: 2),
+                  child: Text(
+                    authorName,
+                    style: TextStyle(
+                      color: palette.secondaryText,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: bubble.peerBubbleColor,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Text(
+                    text,
+                    style: TextStyle(
+                      color: Colors.black87,
+                      fontSize: 15,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 56),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummonBar(ChatPalette palette, ChatGroup group) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _showSummonPicker(group),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: palette.accentColor.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: palette.accentColor.withValues(alpha: 0.3),
+            width: 0.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.record_voice_over_rounded,
+              size: 18,
+              color: palette.accentColor,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '点击召唤角色发言',
+              style: TextStyle(
+                color: palette.accentColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const Spacer(),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: palette.accentColor.withValues(alpha: 0.6),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSummonPicker(ChatGroup group) {
+    final palette = ChatPalette.of(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: palette.surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                child: Row(
+                  children: [
+                    Text(
+                      '召唤谁来发言？',
+                      style: TextStyle(
+                        color: palette.primaryText,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: palette.secondaryText,
+                        size: 20,
+                      ),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(color: palette.separatorColor, height: 1),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.4,
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: group.memberContactIds.length,
+                  itemBuilder: (listCtx, index) {
+                    final contactId = group.memberContactIds[index];
+                    final ChatContact contact;
+                    try {
+                      contact = controller.contactById(contactId);
+                    } catch (_) {
+                      return const SizedBox.shrink();
+                    }
+                    return ListTile(
+                      leading: AvatarWidget(
+                        size: 36,
+                        fallbackColor: contact.avatarColor,
+                        fallbackText: contact.emoji,
+                        avatarUrl: contact.avatarUrl,
+                      ),
+                      title: Text(
+                        contact.name,
+                        style: TextStyle(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      onTap: () {
+                        Navigator.pop(sheetCtx);
+                        controller.sendGroupMessage(
+                          groupId: widget.groupId,
+                          text: '',
+                          targetContactId: contactId,
+                          summonOnly: true,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGroupDrawer(ChatPalette palette, ChatGroup group) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final currentPresetName =
+        controller.getResolvedPresetName(widget.groupId) ??
+            controller.globalPresetName ??
+            '默认';
+
+    return SizedBox(
+      width: screenWidth * 0.72,
+      child: Drawer(
+        backgroundColor: palette.surfaceColor,
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                child: Text(
+                  '群聊设置',
+                  style: TextStyle(
+                    color: palette.primaryText,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Divider(color: palette.separatorColor, height: 1),
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    ListTile(
+                      leading: const Icon(
+                        Icons.person_outline_rounded,
+                        color: Color(0xFF0A84FF),
+                      ),
+                      title: Text(
+                        '用户身份',
+                        style: TextStyle(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        color: palette.secondaryText,
+                      ),
+                      onTap: () => _openPersonaSelect(group),
+                    ),
+                    ListTile(
+                      leading: const Icon(
+                        Icons.layers_outlined,
+                        color: Color(0xFFFFA56C),
+                      ),
+                      title: Text(
+                        '对话预设',
+                        style: TextStyle(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        currentPresetName,
+                        style: TextStyle(
+                          color: palette.secondaryText,
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        color: palette.secondaryText,
+                      ),
+                      onTap: () => _openPresetSelect(),
+                    ),
+                    ListTile(
+                      leading: Icon(
+                        Icons.menu_book_outlined,
+                        color: Colors.green.shade300,
+                      ),
+                      title: Text(
+                        '群世界书',
+                        style: TextStyle(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '开发中',
+                        style: TextStyle(
+                          color: palette.secondaryText,
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        color: palette.secondaryText.withValues(alpha: 0.4),
+                      ),
+                      onTap: null,
+                    ),
+                  ],
+                ),
+              ),
+              Divider(color: palette.separatorColor, height: 1),
+              ListTile(
+                leading: const Icon(
+                  Icons.refresh_rounded,
+                  color: Colors.orange,
+                ),
+                title: const Text(
+                  '重置对话',
+                  style: TextStyle(
+                    color: Colors.orange,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onTap: () => _showResetDialog(group),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Colors.redAccent,
+                ),
+                title: const Text(
+                  '解散群聊',
+                  style: TextStyle(
+                    color: Colors.redAccent,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onTap: () => _showDisbandDialog(group),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openPersonaSelect(ChatGroup group) async {
+    Navigator.pop(context);
+    if (controller.personas.isEmpty) {
+      await controller.fetchPersonas();
+    }
+    if (!mounted) return;
+    final resolved = await controller.getResolvedPersona(group.name);
+    if (!mounted) return;
+    final currentId = (resolved['id'] as String?) ?? '';
+    final selectedId = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PersonaSelectPage(
+          personas: controller.personas,
+          currentPersonaId: currentId,
+          contactName: group.name,
+          avatarUrlBuilder: (id) =>
+              '$kBridgeHost/persona_avatar/${Uri.encodeComponent(id)}',
+        ),
+      ),
+    );
+    if (selectedId != null) {
+      await controller.setChatPersona(group.name, selectedId);
+    }
+  }
+
+  Future<void> _openPresetSelect() async {
+    Navigator.pop(context);
+    if (controller.presetList.isEmpty) {
+      await controller.fetchPresetList();
+    }
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PresetSelectPage(
+          presets: controller.presetList,
+          currentPresetName:
+              controller.getResolvedPresetName(widget.groupId),
+          contactId: widget.groupId,
+          controller: controller,
+        ),
+      ),
+    );
+  }
+
+  void _showResetDialog(ChatGroup group) {
+    Navigator.pop(context); // 关抽屉
+    final palette = ChatPalette.of(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: palette.surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  '重置群聊对话',
+                  style: TextStyle(
+                    color: palette.primaryText,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Divider(color: palette.separatorColor, height: 1),
+              ListTile(
+                leading: const Icon(
+                  Icons.chat_bubble_outline_rounded,
+                  color: Colors.orange,
+                ),
+                title: Text(
+                  '仅清空聊天',
+                  style: TextStyle(
+                    color: palette.primaryText,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  '删除所有消息，保留群聊和记忆',
+                  style: TextStyle(
+                    color: palette.secondaryText,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  controller.resetGroupChat(
+                    groupId: widget.groupId,
+                    clearMemory: false,
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_sweep_outlined,
+                  color: Colors.redAccent,
+                ),
+                title: Text(
+                  '清空聊天 + 记忆',
+                  style: TextStyle(
+                    color: palette.primaryText,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  '删除所有消息和相关记忆',
+                  style: TextStyle(
+                    color: palette.secondaryText,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  controller.resetGroupChat(
+                    groupId: widget.groupId,
+                    clearMemory: true,
+                  );
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  Icons.close_rounded,
+                  color: palette.secondaryText,
+                ),
+                title: Text(
+                  '取消',
+                  style: TextStyle(color: palette.secondaryText),
+                ),
+                onTap: () => Navigator.pop(sheetCtx),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showDisbandDialog(ChatGroup group) {
+    Navigator.pop(context); // 关抽屉
+    final palette = ChatPalette.of(context);
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          backgroundColor: palette.surfaceColor,
+          title: Text(
+            '解散群聊',
+            style: TextStyle(color: palette.primaryText),
+          ),
+          content: Text(
+            '确定要解散「${group.name}」吗？所有消息将被删除，此操作不可撤销。',
+            style: TextStyle(color: palette.secondaryText),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: Text(
+                '取消',
+                style: TextStyle(color: palette.secondaryText),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogCtx);
+                controller.disbandGroup(groupId: widget.groupId);
+                Navigator.of(context).pop(); // 退出群聊页
+              },
+              child: const Text(
+                '解散',
+                style: TextStyle(color: Colors.redAccent),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTypingIndicator(ChatPalette palette) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: palette.secondaryText,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '角色正在回复…',
+            style: TextStyle(color: palette.secondaryText, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorBanner(ChatPalette palette) {
+    final message = controller.getGroupError(widget.groupId)!;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: Colors.redAccent.withValues(alpha: 0.15),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded,
+              size: 16, color: Colors.redAccent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.redAccent,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => controller.clearGroupError(widget.groupId),
+            child: const Icon(
+              Icons.close_rounded,
+              size: 16,
+              color: Colors.redAccent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputBar(ChatPalette palette, bool hasDraftText, ChatGroup group) {
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    final isManual = !controller.isGroupRandomMode(widget.groupId);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: palette.surfaceColor,
+        border: Border(
+          top: BorderSide(color: palette.separatorColor),
+        ),
+      ),
+      padding: EdgeInsets.fromLTRB(12, 8, 12, bottomInset + 10),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isManual && _waitingForSummon) _buildSummonBar(palette, group),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: palette.inputSurface,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: palette.inputBorderColor),
+                  ),
+                  child: TextField(
+                    controller: _inputController,
+                    minLines: 1,
+                    maxLines: 4,
+                    style: TextStyle(color: palette.primaryText, fontSize: 15),
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                    decoration: InputDecoration(
+                      hintText: '发送消息…',
+                      hintStyle: TextStyle(color: palette.secondaryText),
+                      border: InputBorder.none,
+                      isCollapsed: true,
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Material(
+                color: hasDraftText
+                    ? palette.accentColor
+                    : palette.accentColor.withValues(alpha: 0.3),
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: hasDraftText ? _send : null,
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.arrow_upward_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
