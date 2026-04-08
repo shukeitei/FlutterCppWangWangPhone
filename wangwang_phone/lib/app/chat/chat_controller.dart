@@ -197,6 +197,59 @@ class ChatAppController extends ChangeNotifier {
     }
   }
 
+  /// 重置群聊对话：清空消息，可选清掉记忆/摘要
+  void resetGroupChat({
+    required String groupId,
+    required bool clearMemory,
+  }) {
+    final group = _groups[groupId];
+    if (group == null) return;
+
+    final now = DateTime.now();
+    _messages[groupId] = [
+      ChatMessage(
+        id: '$groupId-reset-${now.microsecondsSinceEpoch}',
+        contactId: groupId,
+        sender: ChatMessageSender.ai,
+        body: WordMessageBody('对话已重置'),
+        sentAt: now,
+      ),
+    ];
+
+    final existingThread = _threads[groupId];
+    if (existingThread != null) {
+      _threads[groupId] = existingThread.copyWith(
+        lastMessage: '对话已重置',
+        updatedAt: now,
+        unreadCount: 0,
+      );
+    }
+
+    if (clearMemory) {
+      _summaries.remove(groupId);
+      _memories.removeWhere((m) => m.contactId == groupId);
+    }
+
+    _groupError.remove(groupId);
+    notifyListeners();
+    _saveMessages();
+  }
+
+  /// 解散群聊：彻底清除群组及其所有相关数据
+  void disbandGroup({required String groupId}) {
+    _groups.remove(groupId);
+    _threads.remove(groupId);
+    _messages.remove(groupId);
+    _summaries.remove(groupId);
+    _memories.removeWhere((m) => m.contactId == groupId);
+    _groupError.remove(groupId);
+    _groupRandomMode.remove(groupId);
+
+    notifyListeners();
+    _saveGroups();
+    _saveMessages();
+  }
+
   /// 群聊发消息 / 召唤角色发言。
   /// - 随机模式 + summonOnly=false：追加用户消息 → 自动触发 AI 接力（步骤 8 接入）
   /// - 手动模式 + summonOnly=false：只追加用户消息，不触发 AI，等召唤

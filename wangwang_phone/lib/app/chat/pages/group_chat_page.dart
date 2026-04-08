@@ -6,8 +6,9 @@ import '../chat_controller.dart';
 import '../chat_message_payloads.dart';
 import '../chat_models.dart';
 import '../widgets/avatar_widget.dart';
-import '../widgets/chat_sidebar.dart';
 import '../widgets/group_avatar_widget.dart';
+import 'persona_select_page.dart';
+import 'preset_select_page.dart';
 
 class GroupChatPage extends StatefulWidget {
   const GroupChatPage({
@@ -208,29 +209,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
         return Scaffold(
           key: _scaffoldKey,
           backgroundColor: palette.pageBackground,
-          endDrawer: ChatSidebar(
-            currentPersonaName: '默认',
-            currentPresetName:
-                controller.globalPresetName ?? '默认',
-            onPersonaTap: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('群聊用户身份 - 开发中'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            },
-            onPresetTap: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('群聊预设 - 开发中'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            },
-          ),
+          endDrawer: _buildGroupDrawer(palette, group),
           body: Container(
             color: palette.pageBackground,
             child: SafeArea(
@@ -619,6 +598,331 @@ class _GroupChatPageState extends State<GroupChatPage> {
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGroupDrawer(ChatPalette palette, ChatGroup group) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final currentPresetName =
+        controller.getResolvedPresetName(widget.groupId) ??
+            controller.globalPresetName ??
+            '默认';
+
+    return SizedBox(
+      width: screenWidth * 0.72,
+      child: Drawer(
+        backgroundColor: palette.surfaceColor,
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                child: Text(
+                  '群聊设置',
+                  style: TextStyle(
+                    color: palette.primaryText,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Divider(color: palette.separatorColor, height: 1),
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    ListTile(
+                      leading: const Icon(
+                        Icons.person_outline_rounded,
+                        color: Color(0xFF0A84FF),
+                      ),
+                      title: Text(
+                        '用户身份',
+                        style: TextStyle(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        color: palette.secondaryText,
+                      ),
+                      onTap: () => _openPersonaSelect(group),
+                    ),
+                    ListTile(
+                      leading: const Icon(
+                        Icons.layers_outlined,
+                        color: Color(0xFFFFA56C),
+                      ),
+                      title: Text(
+                        '对话预设',
+                        style: TextStyle(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        currentPresetName,
+                        style: TextStyle(
+                          color: palette.secondaryText,
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        color: palette.secondaryText,
+                      ),
+                      onTap: () => _openPresetSelect(),
+                    ),
+                    ListTile(
+                      leading: Icon(
+                        Icons.menu_book_outlined,
+                        color: Colors.green.shade300,
+                      ),
+                      title: Text(
+                        '群世界书',
+                        style: TextStyle(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '开发中',
+                        style: TextStyle(
+                          color: palette.secondaryText,
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        color: palette.secondaryText.withValues(alpha: 0.4),
+                      ),
+                      onTap: null,
+                    ),
+                  ],
+                ),
+              ),
+              Divider(color: palette.separatorColor, height: 1),
+              ListTile(
+                leading: const Icon(
+                  Icons.refresh_rounded,
+                  color: Colors.orange,
+                ),
+                title: const Text(
+                  '重置对话',
+                  style: TextStyle(
+                    color: Colors.orange,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onTap: () => _showResetDialog(group),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Colors.redAccent,
+                ),
+                title: const Text(
+                  '解散群聊',
+                  style: TextStyle(
+                    color: Colors.redAccent,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onTap: () => _showDisbandDialog(group),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openPersonaSelect(ChatGroup group) async {
+    Navigator.pop(context);
+    if (controller.personas.isEmpty) {
+      await controller.fetchPersonas();
+    }
+    if (!mounted) return;
+    final resolved = await controller.getResolvedPersona(group.name);
+    if (!mounted) return;
+    final currentId = (resolved['id'] as String?) ?? '';
+    final selectedId = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PersonaSelectPage(
+          personas: controller.personas,
+          currentPersonaId: currentId,
+          contactName: group.name,
+          avatarUrlBuilder: (id) =>
+              '$kBridgeHost/persona_avatar/${Uri.encodeComponent(id)}',
+        ),
+      ),
+    );
+    if (selectedId != null) {
+      await controller.setChatPersona(group.name, selectedId);
+    }
+  }
+
+  Future<void> _openPresetSelect() async {
+    Navigator.pop(context);
+    if (controller.presetList.isEmpty) {
+      await controller.fetchPresetList();
+    }
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PresetSelectPage(
+          presets: controller.presetList,
+          currentPresetName:
+              controller.getResolvedPresetName(widget.groupId),
+          contactId: widget.groupId,
+          controller: controller,
+        ),
+      ),
+    );
+  }
+
+  void _showResetDialog(ChatGroup group) {
+    Navigator.pop(context); // 关抽屉
+    final palette = ChatPalette.of(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: palette.surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  '重置群聊对话',
+                  style: TextStyle(
+                    color: palette.primaryText,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Divider(color: palette.separatorColor, height: 1),
+              ListTile(
+                leading: const Icon(
+                  Icons.chat_bubble_outline_rounded,
+                  color: Colors.orange,
+                ),
+                title: Text(
+                  '仅清空聊天',
+                  style: TextStyle(
+                    color: palette.primaryText,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  '删除所有消息，保留群聊和记忆',
+                  style: TextStyle(
+                    color: palette.secondaryText,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  controller.resetGroupChat(
+                    groupId: widget.groupId,
+                    clearMemory: false,
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_sweep_outlined,
+                  color: Colors.redAccent,
+                ),
+                title: Text(
+                  '清空聊天 + 记忆',
+                  style: TextStyle(
+                    color: palette.primaryText,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  '删除所有消息和相关记忆',
+                  style: TextStyle(
+                    color: palette.secondaryText,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  controller.resetGroupChat(
+                    groupId: widget.groupId,
+                    clearMemory: true,
+                  );
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  Icons.close_rounded,
+                  color: palette.secondaryText,
+                ),
+                title: Text(
+                  '取消',
+                  style: TextStyle(color: palette.secondaryText),
+                ),
+                onTap: () => Navigator.pop(sheetCtx),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showDisbandDialog(ChatGroup group) {
+    Navigator.pop(context); // 关抽屉
+    final palette = ChatPalette.of(context);
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          backgroundColor: palette.surfaceColor,
+          title: Text(
+            '解散群聊',
+            style: TextStyle(color: palette.primaryText),
+          ),
+          content: Text(
+            '确定要解散「${group.name}」吗？所有消息将被删除，此操作不可撤销。',
+            style: TextStyle(color: palette.secondaryText),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: Text(
+                '取消',
+                style: TextStyle(color: palette.secondaryText),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogCtx);
+                controller.disbandGroup(groupId: widget.groupId);
+                Navigator.of(context).pop(); // 退出群聊页
+              },
+              child: const Text(
+                '解散',
+                style: TextStyle(color: Colors.redAccent),
+              ),
+            ),
+          ],
         );
       },
     );
