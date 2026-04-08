@@ -11,7 +11,10 @@ import 'chat_moment_composer_page.dart';
 import 'character_detail_page.dart';
 import 'chat_models.dart';
 import 'widgets/avatar_widget.dart';
+import 'widgets/chat_sidebar.dart';
 import 'widgets/preset_widgets.dart';
+import 'pages/persona_select_page.dart';
+import 'pages/preset_select_page.dart';
 
 const double _chatBottomNavigationHeight = 74;
 const List<Color> _bubbleColorOptions = [
@@ -295,8 +298,21 @@ class ChatConversationPage extends StatefulWidget {
 class _ChatConversationPageState extends State<ChatConversationPage> {
   late final TextEditingController _inputController;
   late final ScrollController _scrollController;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   bool _multiSelectMode = false;
   final Set<String> _selectedIds = {};
+  String _resolvedPersonaName = '加载中...';
+  String _resolvedPersonaId = '';
+
+  Future<void> _loadResolvedPersonaForSidebar() async {
+    final result =
+        await widget.controller.getResolvedPersona(widget.contact.name);
+    if (!mounted) return;
+    setState(() {
+      _resolvedPersonaName = (result['name'] as String?) ?? '未知';
+      _resolvedPersonaId = (result['id'] as String?) ?? '';
+    });
+  }
 
   void _enterMultiSelect({String? initialId}) {
     setState(() {
@@ -336,6 +352,7 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
       widget.controller.openConversation(widget.contact.id);
     });
     _scrollToBottomLater();
+    _loadResolvedPersonaForSidebar();
   }
 
   @override
@@ -363,7 +380,54 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
         final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
 
         return Scaffold(
+          key: _scaffoldKey,
           backgroundColor: palette.pageBackground,
+          endDrawer: ChatSidebar(
+            currentPersonaName: _resolvedPersonaName,
+            currentPresetName: widget.controller.getResolvedPresetName(widget.contact.id) ??
+                widget.controller.globalPresetName ??
+                '默认',
+            onPersonaTap: () async {
+              Navigator.pop(context);
+              final selectedId = await Navigator.push<String>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PersonaSelectPage(
+                    personas: widget.controller.personas,
+                    currentPersonaId: _resolvedPersonaId,
+                    contactName: widget.contact.name,
+                    avatarUrlBuilder: (id) =>
+                        '$kBridgeHost/persona_avatar/${Uri.encodeComponent(id)}',
+                  ),
+                ),
+              );
+              if (selectedId != null) {
+                await widget.controller
+                    .setChatPersona(widget.contact.name, selectedId);
+                await _loadResolvedPersonaForSidebar();
+              }
+            },
+            onPresetTap: () async {
+              Navigator.pop(context);
+              if (widget.controller.presetList.isEmpty) {
+                await widget.controller.fetchPresetList();
+              }
+              if (!mounted) return;
+              await Navigator.push<void>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PresetSelectPage(
+                    presets: widget.controller.presetList,
+                    currentPresetName: widget.controller
+                        .getResolvedPresetName(widget.contact.id),
+                    contactId: widget.contact.id,
+                    controller: widget.controller,
+                  ),
+                ),
+              );
+              // 预设/词条开关在页面内实时生效，无需返回值
+            },
+          ),
           body: Container(
             color: palette.pageBackground,
             child: SafeArea(
@@ -475,7 +539,8 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                         const SizedBox(width: 8),
                         _ChatIconButton(
                           icon: Icons.tune_rounded,
-                          onTap: _openChatSettingsSheet,
+                          onTap: () =>
+                              _scaffoldKey.currentState?.openEndDrawer(),
                         ),
                         const SizedBox(width: 8),
                         _ChatIconButton(
@@ -812,20 +877,6 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
               ),
             );
           },
-        );
-      },
-    );
-  }
-
-  Future<void> _openChatSettingsSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) {
-        return _ChatSettingsSheet(
-          controller: widget.controller,
-          contact: widget.contact,
         );
       },
     );
@@ -1350,24 +1401,6 @@ String _personaPreview(String desc) {
   return oneLine.length > 30 ? '${oneLine.substring(0, 30)}...' : oneLine;
 }
 
-String _personaSubtitle(Map<String, dynamic> persona) {
-  final name = persona['name'] as String? ?? '';
-  final desc = persona['description'] as String? ?? '';
-  final short = desc.length > 30 ? '${desc.substring(0, 30)}...' : desc;
-  if (short.isEmpty) return name;
-  return '$name — $short';
-}
-
-String _currentPersonaLabel(ChatAppController controller) {
-  if (controller.globalPersonaId.isEmpty) return '未选择';
-  for (final p in controller.personas) {
-    if (p['id'] == controller.globalPersonaId) {
-      return _personaSubtitle(p);
-    }
-  }
-  return '未选择';
-}
-
 void _showPersonaPicker(BuildContext context, ChatAppController controller) {
   final palette = ChatPalette.of(context);
 
@@ -1536,184 +1569,6 @@ class _PersonaListTile extends StatelessWidget {
               if (selected)
                 Icon(Icons.check_circle, color: palette.accentColor, size: 22),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── 聊天设置弹窗 ──
-
-class _ChatSettingsSheet extends StatefulWidget {
-  const _ChatSettingsSheet({
-    required this.controller,
-    required this.contact,
-  });
-
-  final ChatAppController controller;
-  final ChatContact contact;
-
-  @override
-  State<_ChatSettingsSheet> createState() => _ChatSettingsSheetState();
-}
-
-class _ChatSettingsSheetState extends State<_ChatSettingsSheet> {
-  Map<String, dynamic>? _resolvedPersona;
-  bool _showPersonaList = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadResolved();
-  }
-
-  Future<void> _loadResolved() async {
-    final result = await widget.controller.getResolvedPersona(widget.contact.name);
-    if (mounted) setState(() => _resolvedPersona = result);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = ChatPalette.of(context);
-    final personas = widget.controller.personas;
-    final resolvedName = _resolvedPersona?['name'] as String? ?? '加载中...';
-
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        child: Container(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.75,
-          ),
-          decoration: BoxDecoration(
-            color: palette.surfaceColor,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: palette.separatorColor),
-          ),
-          padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 42,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: palette.separatorColor,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Center(
-                  child: Text(
-                    '聊天设置',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: palette.primaryText,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () => setState(() => _showPersonaList = !_showPersonaList),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          color: palette.accentColor.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(Icons.person_outline, color: palette.accentColor, size: 22),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '用户身份',
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                color: palette.primaryText,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              resolvedName,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: palette.secondaryText,
-                                height: 1.45,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(
-                        _showPersonaList ? Icons.expand_less : Icons.expand_more,
-                        color: palette.secondaryText,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (_showPersonaList) ...[
-                const SizedBox(height: 8),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: personas.length + 1,
-                    itemBuilder: (_, index) {
-                      if (index == 0) {
-                        final globalLabel = _currentPersonaLabel(widget.controller);
-                        return _PersonaListTile(
-                          title: '跟随全局（当前：$globalLabel）',
-                          subtitle: '',
-                          selected: (_resolvedPersona?['id'] as String? ?? '').isEmpty,
-                          palette: palette,
-                          onTap: () async {
-                            await widget.controller.setChatPersona(widget.contact.name, '');
-                            await _loadResolved();
-                          },
-                        );
-                      }
-                      final p = personas[index - 1];
-                      final id = p['id'] as String? ?? '';
-                      final name = p['name'] as String? ?? '未知';
-                      final desc = p['description'] as String? ?? '';
-                      return _PersonaListTile(
-                        title: name,
-                        subtitle: _personaPreview(desc),
-                        selected: id == (_resolvedPersona?['id'] as String? ?? ''),
-                        palette: palette,
-                        personaId: id,
-                        personaName: name,
-                        onTap: () async {
-                          await widget.controller.setChatPersona(widget.contact.name, id);
-                          await _loadResolved();
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-              const Divider(height: 1, color: Color(0x18FFFFFF)),
-              ChatPresetSection(
-                controller: widget.controller,
-                contactId: widget.contact.id,
-              ),
-            ],
-          ),
           ),
         ),
       ),
