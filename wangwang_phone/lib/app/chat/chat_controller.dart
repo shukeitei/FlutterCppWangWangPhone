@@ -98,7 +98,10 @@ class ChatAppController extends ChangeNotifier {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       for (final entry in data.entries) {
         final contactId = entry.key;
-        if (!_messages.containsKey(contactId)) continue;
+        if (!_messages.containsKey(contactId)) {
+          // 群聊消息：恢复时 _messages 里可能还没有这个 groupId 的 key
+          _messages[contactId] = [];
+        }
         final msgs = (entry.value as List).map((m) {
           final altList = (m['alternatives'] as List?)
                   ?.map<ChatMessageBody>(
@@ -489,8 +492,8 @@ Future<void> syncContactsFromBridge() async {
     }
 
     notifyListeners();
-    await loadPersistedMessages(); // 加这一行，在同步角色之后再恢复消息
-    await loadPersistedGroups();
+    await loadPersistedGroups();   // 先恢复群组：建好 _messages[groupId] 容器
+    await loadPersistedMessages(); // 再恢复消息：群消息能找到对应 key
   } catch (e) {
     // 桥接服务连不上就保留原来的联系人
   }

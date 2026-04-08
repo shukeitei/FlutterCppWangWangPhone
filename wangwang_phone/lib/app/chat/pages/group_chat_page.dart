@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../character_detail_page.dart';
 import '../chat_app_page.dart';
 import '../chat_controller.dart';
 import '../chat_message_payloads.dart';
@@ -62,6 +63,104 @@ class _GroupChatPageState extends State<GroupChatPage> {
         curve: Curves.easeOut,
       );
     });
+  }
+
+  void _showMemberList(ChatGroup group) {
+    final palette = ChatPalette.of(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: palette.surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                child: Row(
+                  children: [
+                    Text(
+                      '群成员 (${group.memberContactIds.length})',
+                      style: TextStyle(
+                        color: palette.primaryText,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: palette.secondaryText,
+                        size: 20,
+                      ),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(color: palette.separatorColor, height: 1),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.5,
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: group.memberContactIds.length,
+                  itemBuilder: (listCtx, index) {
+                    final contactId = group.memberContactIds[index];
+                    final ChatContact contact;
+                    try {
+                      contact = controller.contactById(contactId);
+                    } catch (_) {
+                      return const SizedBox.shrink();
+                    }
+                    return ListTile(
+                      leading: AvatarWidget(
+                        size: 40,
+                        fallbackColor: contact.avatarColor,
+                        fallbackText: contact.emoji,
+                        avatarUrl: contact.avatarUrl,
+                      ),
+                      title: Text(
+                        contact.name,
+                        style: TextStyle(
+                          color: palette.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        contact.signature,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: palette.secondaryText,
+                          fontSize: 12,
+                        ),
+                      ),
+                      onTap: () {
+                        Navigator.pop(sheetCtx);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => CharacterDetailPage(
+                              controller: controller,
+                              contact: contact,
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _send() {
@@ -177,35 +276,51 @@ class _GroupChatPageState extends State<GroupChatPage> {
             ),
             onPressed: () => Navigator.of(context).maybePop(),
           ),
-          GroupAvatarWidget(
-            group: group,
-            controller: controller,
-            size: 40,
-          ),
-          const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  group.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: palette.primaryText,
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${group.memberContactIds.length} 位成员',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: palette.secondaryText,
-                      ),
-                ),
-              ],
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _showMemberList(group),
+              child: Row(
+                children: [
+                  GroupAvatarWidget(
+                    group: group,
+                    controller: controller,
+                    size: 40,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          group.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(
+                                color: palette.primaryText,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${group.memberContactIds.length} 位成员',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: palette.secondaryText,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           IconButton(
