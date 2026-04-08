@@ -485,51 +485,91 @@ ${memberProfiles.join('\n\n')}
       return;
     }
 
+    int appendedCount = 0;
     for (final entry in replies) {
       if (entry is! Map) continue;
       final name = (entry['name'] ?? '').toString().trim();
       final replyText = (entry['reply'] ?? '').toString().trim();
       if (name.isEmpty || replyText.isEmpty) continue;
 
-      // 把 name 映射回 contactId：先精确匹配，再模糊包含（AI 可能返回去前缀的名字）
-      String? replyContactId;
-      for (final cid in group.memberContactIds) {
-        try {
-          if (contactById(cid).name == name) {
-            replyContactId = cid;
-            break;
-          }
-        } catch (_) {}
-      }
+      final replyContactId = _matchGroupMember(group, name);
       if (replyContactId == null) {
-        for (final cid in group.memberContactIds) {
-          try {
-            final contactName = contactById(cid).name;
-            if (contactName.contains(name) || name.contains(contactName)) {
-              replyContactId = cid;
-              break;
-            }
-          } catch (_) {}
-        }
+        // AI 幻觉：返回了群里不存在的角色名，丢弃该条避免显示成"群消息"
+        debugPrint('[group-ai] 跳过未知角色: "$name"');
+        continue;
       }
 
       final ts = DateTime.now();
       _appendMessage(
         contactId: groupId,
         message: ChatMessage(
-          id: '$groupId-${replyContactId ?? name}-${ts.microsecondsSinceEpoch}',
-          contactId: replyContactId ?? groupId,
+          id: '$groupId-$replyContactId-${ts.microsecondsSinceEpoch}',
+          contactId: replyContactId,
           sender: ChatMessageSender.ai,
           body: WordMessageBody(replyText),
           sentAt: ts,
         ),
         unreadCount: 0,
       );
+      appendedCount++;
 
       // 让接力有节奏感
       await Future.delayed(const Duration(milliseconds: 300));
       notifyListeners();
     }
+
+    // 所有条目都匹不上群成员 → 退回把原文显示成系统回复，不让用户什么都看不到
+    if (appendedCount == 0) {
+      _appendGroupFallbackReply(groupId, rawReply);
+    }
+  }
+
+  /// 把 AI 返回的角色名映射到群成员 contactId。
+  /// 策略：精确 → 归一化精确 → 归一化双向包含。归一化会去掉常见标点/括号/空白。
+  String? _matchGroupMember(ChatGroup group, String name) {
+    // 第一轮：原样精确匹配
+    for (final cid in group.memberContactIds) {
+      try {
+        if (contactById(cid).name == name) return cid;
+      } catch (_) {}
+    }
+
+    final normalizedTarget = _normalizeContactName(name);
+    if (normalizedTarget.isEmpty) return null;
+
+    // 第二轮：归一化后精确匹配
+    for (final cid in group.memberContactIds) {
+      try {
+        if (_normalizeContactName(contactById(cid).name) == normalizedTarget) {
+          return cid;
+        }
+      } catch (_) {}
+    }
+
+    // 第三轮：归一化后双向包含
+    for (final cid in group.memberContactIds) {
+      try {
+        final normalizedMember =
+            _normalizeContactName(contactById(cid).name);
+        if (normalizedMember.isEmpty) continue;
+        if (normalizedMember.contains(normalizedTarget) ||
+            normalizedTarget.contains(normalizedMember)) {
+          return cid;
+        }
+      } catch (_) {}
+    }
+
+    return null;
+  }
+
+  /// 归一化角色名：去掉空白、各种括号、引号、标点
+  String _normalizeContactName(String input) {
+    return input
+        .replaceAll(RegExp(r'\s+'), '')
+        .replaceAll(RegExp(r'[\[\](){}【】《》（）「」『』<>]'), '')
+        .replaceAll(RegExp('[\'"`\u2018\u2019\u201C\u201D]'), '')
+        .replaceAll(RegExp(r'[~!@#$%^&*_=+|/?.,;:\-]'), '')
+        .toLowerCase();
   }
 
   /// 手动召唤：只调一个角色
