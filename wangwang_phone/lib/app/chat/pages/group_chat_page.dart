@@ -324,16 +324,26 @@ class _GroupChatPageState extends State<GroupChatPage> {
             ),
           ),
           IconButton(
-            tooltip: '发言模式',
-            icon: const Icon(
-              Icons.flash_on_rounded,
-              color: Color(0xFFFFC65C),
+            tooltip: controller.isGroupRandomMode(widget.groupId)
+                ? '随机接力模式'
+                : '手动指定模式',
+            icon: Icon(
+              controller.isGroupRandomMode(widget.groupId)
+                  ? Icons.flash_on_rounded
+                  : Icons.flash_off_rounded,
+              color: controller.isGroupRandomMode(widget.groupId)
+                  ? const Color(0xFFFFC65C)
+                  : palette.secondaryText,
             ),
             onPressed: () {
+              controller.toggleGroupMode(widget.groupId);
+              final mode = controller.isGroupRandomMode(widget.groupId)
+                  ? '随机接力'
+                  : '手动指定';
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('发言模式切换 - 开发中'),
-                  duration: Duration(seconds: 2),
+                SnackBar(
+                  content: Text('已切换为 $mode 模式'),
+                  duration: const Duration(seconds: 1),
                 ),
               );
             },

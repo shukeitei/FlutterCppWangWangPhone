@@ -182,6 +182,13 @@ class ChatAppController extends ChangeNotifier {
     } catch (_) {}
   }
 
+  bool isGroupRandomMode(String groupId) => _groupRandomMode[groupId] ?? true;
+
+  void toggleGroupMode(String groupId) {
+    _groupRandomMode[groupId] = !isGroupRandomMode(groupId);
+    notifyListeners();
+  }
+
   /// 群聊发消息：暂时只追加用户消息，不调 AI（AI 多角色回复在后续批次接入）
   void sendGroupMessage({required String groupId, required String text}) {
     final trimmed = text.trim();
@@ -252,6 +259,7 @@ class ChatAppController extends ChangeNotifier {
   final Set<String> _typingContacts = <String>{};
   final Map<String, ChatContextBundle> _lastContextBundles = {};
   final Map<String, ChatGroup> _groups = {};
+  final Map<String, bool> _groupRandomMode = {}; // groupId -> true=随机, false=手动；默认 true
   ChatBubbleAppearance _bubbleAppearance;
   List<Map<String, dynamic>> _personas = [];
   String _globalPersonaId = '';
