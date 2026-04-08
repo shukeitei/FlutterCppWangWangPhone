@@ -124,6 +124,92 @@ class ChatAppController extends ChangeNotifier {
     } catch (_) {}
   }
 
+  // ===== 群聊：建群、持久化 =====
+  ChatGroup createGroup({
+    required String name,
+    required List<String> memberContactIds,
+  }) {
+    final now = DateTime.now();
+    final groupId = 'group_${now.microsecondsSinceEpoch}';
+
+    final group = ChatGroup(
+      id: groupId,
+      name: name.trim(),
+      memberContactIds: List<String>.from(memberContactIds),
+      createdAt: now,
+    );
+    _groups[groupId] = group;
+
+    _threads[groupId] = ChatThread(
+      contactId: groupId,
+      lastMessage: '群聊已创建',
+      updatedAt: now,
+      groupId: groupId,
+    );
+
+    _messages[groupId] = [
+      ChatMessage(
+        id: '$groupId-${now.microsecondsSinceEpoch}',
+        contactId: groupId,
+        sender: ChatMessageSender.ai,
+        body: WordMessageBody('群聊「${name.trim()}」已创建，开始聊天吧'),
+        sentAt: now,
+      ),
+    ];
+
+    notifyListeners();
+    _saveGroups();
+    return group;
+  }
+
+  Future<void> _saveGroups() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/wangwang_groups.json');
+      final data = <String, dynamic>{};
+      for (final entry in _groups.entries) {
+        data[entry.key] = {
+          'id': entry.value.id,
+          'name': entry.value.name,
+          'memberContactIds': entry.value.memberContactIds,
+          'createdAt': entry.value.createdAt.toIso8601String(),
+        };
+      }
+      await file.writeAsString(jsonEncode(data));
+    } catch (_) {}
+  }
+
+  Future<void> loadPersistedGroups() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/wangwang_groups.json');
+      if (!await file.exists()) return;
+      final raw = await file.readAsString();
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      for (final entry in data.entries) {
+        final g = entry.value;
+        final group = ChatGroup(
+          id: g['id'],
+          name: g['name'],
+          memberContactIds: List<String>.from(g['memberContactIds']),
+          createdAt: DateTime.parse(g['createdAt']),
+        );
+        _groups[group.id] = group;
+
+        if (!_threads.containsKey(group.id)) {
+          _threads[group.id] = ChatThread(
+            contactId: group.id,
+            lastMessage: '群聊已创建',
+            updatedAt: group.createdAt,
+            groupId: group.id,
+          );
+          _messages[group.id] ??= [];
+        }
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
+
   final List<ChatContact> _contacts;
   final Map<String, ChatThread> _threads;
   final Map<String, List<ChatMessage>> _messages;
@@ -141,6 +227,7 @@ class ChatAppController extends ChangeNotifier {
   final ChatSummaryStore _summaryStore;
   final Set<String> _typingContacts = <String>{};
   final Map<String, ChatContextBundle> _lastContextBundles = {};
+  final Map<String, ChatGroup> _groups = {};
   ChatBubbleAppearance _bubbleAppearance;
   List<Map<String, dynamic>> _personas = [];
   String _globalPersonaId = '';
@@ -246,7 +333,11 @@ class ChatAppController extends ChangeNotifier {
     return List<ChatSystemEntry>.unmodifiable(items);
   }
 
-  List<ChatContact> get contacts => List<ChatContact>.unmodifiable(_contacts);
+  List<ChatContact> get contacts {
+    final sorted = List<ChatContact>.from(_contacts)
+      ..sort((a, b) => a.name.compareTo(b.name));
+    return List<ChatContact>.unmodifiable(sorted);
+  }
 
   List<MomentPost> get moments {
     final sortedMoments = List<MomentPost>.from(_moments)
@@ -263,6 +354,38 @@ class ChatAppController extends ChangeNotifier {
         return right.updatedAt.compareTo(left.updatedAt);
       });
     return List<ChatThread>.unmodifiable(sortedThreads);
+  }
+
+  List<ChatThread> get friendThreads {
+    final items = _threads.values.where((t) => !t.isGroup).toList()
+      ..sort((left, right) {
+        if (left.isPinned != right.isPinned) {
+          return left.isPinned ? -1 : 1;
+        }
+        return right.updatedAt.compareTo(left.updatedAt);
+      });
+    return List<ChatThread>.unmodifiable(items);
+  }
+
+  List<ChatThread> get groupThreads {
+    final items = _threads.values.where((t) => t.isGroup).toList()
+      ..sort((left, right) {
+        if (left.isPinned != right.isPinned) {
+          return left.isPinned ? -1 : 1;
+        }
+        return right.updatedAt.compareTo(left.updatedAt);
+      });
+    return List<ChatThread>.unmodifiable(items);
+  }
+
+  List<ChatGroup> get groups {
+    final items = _groups.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return List<ChatGroup>.unmodifiable(items);
+  }
+
+  ChatGroup groupById(String groupId) {
+    return _groups[groupId]!;
   }
 
   ChatContact contactById(String contactId) {
@@ -300,7 +423,7 @@ Future<void> syncContactsFromBridge() async {
     final List<dynamic> list = res.data;
 
     _contacts.clear();
-    _threads.clear();
+    _threads.removeWhere((key, thread) => !thread.isGroup);
     _moments.clear();
 
     final now = DateTime.now();
@@ -350,6 +473,7 @@ Future<void> syncContactsFromBridge() async {
 
     notifyListeners();
     await loadPersistedMessages(); // 加这一行，在同步角色之后再恢复消息
+    await loadPersistedGroups();
   } catch (e) {
     // 桥接服务连不上就保留原来的联系人
   }
