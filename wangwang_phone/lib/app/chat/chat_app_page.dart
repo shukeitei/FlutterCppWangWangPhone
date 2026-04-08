@@ -15,6 +15,7 @@ import 'widgets/chat_sidebar.dart';
 import 'widgets/group_avatar_widget.dart';
 import 'widgets/preset_widgets.dart';
 import 'pages/create_group_page.dart';
+import 'pages/group_chat_page.dart';
 import 'pages/persona_select_page.dart';
 import 'pages/preset_select_page.dart';
 
@@ -1270,8 +1271,14 @@ class _ChatThreadsTabState extends State<_ChatThreadsTab>
                         group: group,
                         thread: thread,
                         onTap: () {
-                          // 步骤 5 接入群聊会话页
-                          debugPrint('打开群聊: ${group.name}');
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => GroupChatPage(
+                                controller: widget.controller,
+                                groupId: group.id,
+                              ),
+                            ),
+                          );
                         },
                       ),
                     );

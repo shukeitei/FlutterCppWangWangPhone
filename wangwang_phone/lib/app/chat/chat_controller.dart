@@ -179,6 +179,27 @@ class ChatAppController extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// 群聊发消息：暂时只追加用户消息，不调 AI（AI 多角色回复在后续批次接入）
+  void sendGroupMessage({required String groupId, required String text}) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    if (!_groups.containsKey(groupId)) return;
+
+    final now = DateTime.now();
+    _appendMessage(
+      contactId: groupId,
+      message: ChatMessage(
+        id: '$groupId-${now.microsecondsSinceEpoch}',
+        contactId: groupId,
+        sender: ChatMessageSender.user,
+        body: WordMessageBody(trimmed),
+        sentAt: now,
+      ),
+      unreadCount: 0,
+    );
+    _saveMessages();
+  }
+
   Future<void> loadPersistedGroups() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
