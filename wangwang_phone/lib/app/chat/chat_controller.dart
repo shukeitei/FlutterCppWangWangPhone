@@ -57,6 +57,7 @@ class ChatAppController extends ChangeNotifier {
     loadGlobalPersona();
     fetchPresetList();
     loadGlobalPreset();
+    loadPresetOverrides();
     loadApiConfig();
   }
   /// 把当前所有消息持久化到本地 JSON 文件
@@ -461,6 +462,7 @@ Future<void> syncContactsFromBridge() async {
     // 持久化
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('global_preset_name', presetName);
+    _savePresetOverrides();
     notifyListeners();
   }
 
@@ -481,6 +483,7 @@ Future<void> syncContactsFromBridge() async {
     } else {
       _chatPresetOverrides[contactId] = presetName;
     }
+    _savePresetOverrides();
     notifyListeners();
   }
 
@@ -492,6 +495,7 @@ Future<void> syncContactsFromBridge() async {
   /// 设置词条开关覆盖（全局级别）
   void setGlobalPromptToggle(String identifier, bool enabled) {
     _globalPromptToggles[identifier] = enabled;
+    _savePresetOverrides();
     notifyListeners();
   }
 
@@ -499,7 +503,57 @@ Future<void> syncContactsFromBridge() async {
   void setChatPromptToggle(String contactId, String identifier, bool enabled) {
     _chatPromptToggles.putIfAbsent(contactId, () => {});
     _chatPromptToggles[contactId]![identifier] = enabled;
+    _savePresetOverrides();
     notifyListeners();
+  }
+
+  /// 将预设覆盖和词条开关持久化到本地 JSON
+  Future<void> _savePresetOverrides() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/wangwang_preset_overrides.json');
+      final data = {
+        'globalPreset': _globalPresetName,
+        'chatPresets': _chatPresetOverrides,
+        'globalToggles': _globalPromptToggles,
+        'chatToggles': _chatPromptToggles,
+      };
+      await file.writeAsString(jsonEncode(data));
+    } catch (_) {}
+  }
+
+  /// 启动时从本地恢复预设覆盖和词条开关
+  Future<void> loadPresetOverrides() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/wangwang_preset_overrides.json');
+      if (!await file.exists()) return;
+      final raw =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+
+      if (raw['globalPreset'] is String) {
+        _globalPresetName = raw['globalPreset'] as String;
+      }
+      if (raw['chatPresets'] is Map) {
+        _chatPresetOverrides
+          ..clear()
+          ..addAll(Map<String, String>.from(raw['chatPresets'] as Map));
+      }
+      if (raw['globalToggles'] is Map) {
+        _globalPromptToggles
+          ..clear()
+          ..addAll(Map<String, bool>.from(raw['globalToggles'] as Map));
+      }
+      if (raw['chatToggles'] is Map) {
+        final ct = raw['chatToggles'] as Map<String, dynamic>;
+        _chatPromptToggles.clear();
+        ct.forEach((k, v) {
+          _chatPromptToggles[k] =
+              Map<String, bool>.from(v as Map);
+        });
+      }
+      notifyListeners();
+    } catch (_) {}
   }
 
   /// 解析某词条在某聊天中的最终开关状态
