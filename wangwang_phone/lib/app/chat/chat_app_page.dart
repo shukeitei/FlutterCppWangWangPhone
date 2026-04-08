@@ -13,6 +13,7 @@ import 'chat_models.dart';
 import 'widgets/avatar_widget.dart';
 import 'widgets/chat_sidebar.dart';
 import 'widgets/preset_widgets.dart';
+import 'pages/create_group_page.dart';
 import 'pages/persona_select_page.dart';
 import 'pages/preset_select_page.dart';
 
@@ -1081,15 +1082,14 @@ class _ChatThreadsTabState extends State<_ChatThreadsTab>
     super.dispose();
   }
 
-  void _handleAddPressed() {
+  Future<void> _handleAddPressed() async {
     if (_currentSubTab == 1) {
-      // 群聊 tab：建群入口（CreateGroupPage 在步骤 4 实现）
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('建群功能开发中…'),
-          duration: Duration(seconds: 2),
+      await Navigator.of(context).push<ChatGroup>(
+        MaterialPageRoute(
+          builder: (_) => CreateGroupPage(controller: widget.controller),
         ),
       );
+      // 建群成功后 controller 会 notifyListeners，列表自动刷新
     }
     // 好友 tab 暂不接入任何动作
   }
