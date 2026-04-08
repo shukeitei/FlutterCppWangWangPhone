@@ -2590,15 +2590,15 @@ class _ChatMessageBubbleState extends State<_ChatMessageBubble> {
                           Icons.chevron_left_rounded,
                           size: 18,
                           color: widget.message.activeAltIndex > 0
-                              ? Colors.white54
-                              : Colors.white12,
+                              ? palette.secondaryText
+                              : palette.secondaryText.withOpacity(0.3),
                         ),
                       ),
                     ),
                     Text(
                       '${widget.message.activeAltIndex + 1}/${widget.message.alternatives.length}',
-                      style: const TextStyle(
-                        color: Colors.white38,
+                      style: TextStyle(
+                        color: palette.secondaryText,
                         fontSize: 12,
                       ),
                     ),
@@ -2618,8 +2618,8 @@ class _ChatMessageBubbleState extends State<_ChatMessageBubble> {
                           size: 18,
                           color: widget.message.activeAltIndex <
                                   widget.message.alternatives.length - 1
-                              ? Colors.white54
-                              : Colors.white12,
+                              ? palette.secondaryText
+                              : palette.secondaryText.withOpacity(0.3),
                         ),
                       ),
                     ),
@@ -2632,12 +2632,12 @@ class _ChatMessageBubbleState extends State<_ChatMessageBubble> {
                         contactId: widget.message.contactId,
                       );
                     },
-                    child: const Padding(
-                      padding: EdgeInsets.all(4),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
                       child: Icon(
                         Icons.refresh_rounded,
                         size: 18,
-                        color: Colors.white38,
+                        color: palette.secondaryText,
                       ),
                     ),
                   ),
