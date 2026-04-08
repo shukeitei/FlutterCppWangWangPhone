@@ -222,35 +222,289 @@ class ChatAppController extends ChangeNotifier {
     }
 
     final isRandom = isGroupRandomMode(groupId);
+    final shouldCallAi =
+        (isRandom && !summonOnly) || (summonOnly && targetContactId != null);
+    if (!shouldCallAi) return;
 
-    if (isRandom && !summonOnly) {
-      // 随机接力：用户发完消息后自动触发 AI
-      await _sendGroupRandomReply(groupId, group, text);
-    } else if (summonOnly && targetContactId != null) {
-      // 手动召唤：触发指定角色发言
-      await _sendGroupManualReply(groupId, group, targetContactId);
+    if (!isApiConfigured) {
+      _appendGroupFallbackReply(
+        groupId,
+        '【未配置接口】请先在"我"页面设置 API 接口和密钥。',
+      );
+      return;
     }
-    // 手动模式 + 非召唤：什么都不做，等用户召唤
+
+    _typingContacts.add(groupId);
+    notifyListeners();
+
+    try {
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 5);
+      dio.options.receiveTimeout = const Duration(seconds: 120);
+
+      if (isRandom && !summonOnly) {
+        await _sendGroupRandomReply(dio, groupId, group);
+      } else if (summonOnly && targetContactId != null) {
+        await _sendGroupManualReply(dio, groupId, group, targetContactId);
+      }
+      await _saveMessages();
+    } catch (e) {
+      _appendGroupFallbackReply(groupId, '【信号中断】$e');
+    } finally {
+      _typingContacts.remove(groupId);
+      notifyListeners();
+    }
   }
 
-  /// 步骤 8 接入：随机接力 AI 回复
-  // ignore: unused_element
+  /// 群聊 AI 共用：构建最近的对话历史（OpenAI 格式）
+  List<Map<String, dynamic>> _buildGroupHistory(String groupId) {
+    final history = messagesFor(groupId)
+        .where((m) => m.body is WordMessageBody && !m.isHidden)
+        .toList();
+    final recent =
+        history.length > 50 ? history.sublist(history.length - 50) : history;
+    return [
+      for (final m in recent)
+        {
+          'role': m.sender == ChatMessageSender.user ? 'user' : 'assistant',
+          'content': (m.body as WordMessageBody).text,
+        },
+    ];
+  }
+
+  /// 群聊 AI 共用：发请求并取出纯文本回复（兼容 claude / openai 格式）
+  Future<String> _callGroupChatApi({
+    required Dio dio,
+    required String systemPrompt,
+    required List<Map<String, dynamic>> historyMessages,
+    required int maxTokens,
+  }) async {
+    final provider = currentApiProvider!;
+    final Map<String, dynamic> requestData;
+    final Map<String, String> requestHeaders;
+
+    if (_apiProviderId == 'claude') {
+      requestHeaders = {
+        'Content-Type': 'application/json',
+        'x-api-key': _apiKey,
+        'anthropic-version': '2023-06-01',
+      };
+      requestData = {
+        'model': _apiModelId,
+        'max_tokens': maxTokens,
+        'system': systemPrompt,
+        'messages': historyMessages,
+      };
+    } else {
+      requestHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $_apiKey',
+      };
+      requestData = {
+        'model': _apiModelId,
+        'messages': [
+          {'role': 'system', 'content': systemPrompt},
+          ...historyMessages,
+        ],
+        'max_tokens': maxTokens,
+        'stream': false,
+      };
+    }
+
+    final response = await dio.post(
+      provider.baseUrl,
+      options: Options(headers: requestHeaders),
+      data: requestData,
+    );
+
+    if (_apiProviderId == 'claude') {
+      final content = response.data['content'] as List;
+      return content
+          .where((block) => block['type'] == 'text')
+          .map((block) => block['text'] as String)
+          .join('\n');
+    } else {
+      return response.data['choices'][0]['message']['content'] as String;
+    }
+  }
+
+  /// 拉指定角色的角色卡，拼成一段 persona 文本
+  Future<String> _fetchCharacterPersona(Dio dio, ChatContact contact) async {
+    try {
+      final res = await dio.get(
+        '$kBridgeHost/characters/${Uri.encodeComponent(contact.name)}',
+      );
+      final d = res.data;
+      final desc =
+          _replacePlaceholders((d['description'] as String?) ?? '', contact.name);
+      final personality = _replacePlaceholders(
+          (d['personality'] as String?) ?? '', contact.name);
+      final scenario =
+          _replacePlaceholders((d['scenario'] as String?) ?? '', contact.name);
+      return [
+        if (desc.isNotEmpty) desc,
+        if (personality.isNotEmpty) '性格：$personality',
+        if (scenario.isNotEmpty) '场景：$scenario',
+      ].join('\n');
+    } catch (_) {
+      return contact.personaSummary.isNotEmpty
+          ? contact.personaSummary
+          : '${contact.name}：来自酒馆的角色';
+    }
+  }
+
+  /// 随机接力 AI 回复：一次 API 调用，AI 决定哪些角色回复
   Future<void> _sendGroupRandomReply(
+    Dio dio,
     String groupId,
     ChatGroup group,
-    String userText,
   ) async {
-    // TODO(group-ai): 接入随机接力 AI 调用（步骤 8）
+    // 拉所有成员的简要 persona
+    final memberProfiles = <String>[];
+    for (final cid in group.memberContactIds) {
+      try {
+        final c = contactById(cid);
+        final persona = await _fetchCharacterPersona(dio, c);
+        memberProfiles.add('【${c.name}】\n$persona');
+      } catch (_) {}
+    }
+
+    final memberCount = group.memberContactIds.length;
+    final replyCountHint = memberCount <= 5
+        ? '1-2个角色'
+        : memberCount <= 10
+            ? '1-3个角色'
+            : '2-3个角色';
+
+    final systemPrompt = '''你是一个群聊模拟器。这个群聊叫「${group.name}」，有$memberCount位成员。
+
+以下是每位成员的角色设定：
+${memberProfiles.join('\n\n')}
+
+你的任务：
+1. 根据用户的最新消息和对话上下文，决定哪些角色会回复（选$replyCountHint）
+2. 只选和当前话题相关、有动机发言的角色
+3. 每个角色的回复要符合其性格和说话风格
+4. 回复要自然口语化，像真的群聊一样
+
+你必须且只能返回以下格式的 JSON 数组，不要返回任何其他内容：
+[{"name":"角色名","reply":"回复内容"},{"name":"角色名","reply":"回复内容"}]''';
+
+    final history = _buildGroupHistory(groupId);
+    final rawReply = await _callGroupChatApi(
+      dio: dio,
+      systemPrompt: systemPrompt,
+      historyMessages: history,
+      maxTokens: 2000,
+    );
+
+    // 解析 JSON 数组（AI 可能在前后塞废话）
+    final jsonMatch = RegExp(r'\[.*\]', dotAll: true).firstMatch(rawReply);
+    if (jsonMatch == null) {
+      _appendGroupFallbackReply(groupId, rawReply);
+      return;
+    }
+
+    List<dynamic> replies;
+    try {
+      replies = jsonDecode(jsonMatch.group(0)!) as List<dynamic>;
+    } catch (_) {
+      _appendGroupFallbackReply(groupId, rawReply);
+      return;
+    }
+
+    for (final entry in replies) {
+      if (entry is! Map) continue;
+      final name = (entry['name'] as String?)?.trim() ?? '';
+      final replyText = (entry['reply'] as String?)?.trim() ?? '';
+      if (name.isEmpty || replyText.isEmpty) continue;
+
+      // 把 name 映射回 contactId
+      String? replyContactId;
+      for (final cid in group.memberContactIds) {
+        try {
+          if (contactById(cid).name == name) {
+            replyContactId = cid;
+            break;
+          }
+        } catch (_) {}
+      }
+
+      final ts = DateTime.now();
+      _appendMessage(
+        contactId: groupId,
+        message: ChatMessage(
+          id: '$groupId-${replyContactId ?? name}-${ts.microsecondsSinceEpoch}',
+          contactId: replyContactId ?? groupId,
+          sender: ChatMessageSender.ai,
+          body: WordMessageBody(replyText),
+          sentAt: ts,
+        ),
+        unreadCount: 0,
+      );
+
+      // 让接力有节奏感
+      await Future.delayed(const Duration(milliseconds: 300));
+      notifyListeners();
+    }
   }
 
-  /// 步骤 8 接入：手动召唤指定角色 AI 回复
-  // ignore: unused_element
+  /// 手动召唤：只调一个角色
   Future<void> _sendGroupManualReply(
+    Dio dio,
     String groupId,
     ChatGroup group,
     String targetContactId,
   ) async {
-    // TODO(group-ai): 接入指定角色 AI 调用（步骤 8）
+    final ChatContact contact;
+    try {
+      contact = contactById(targetContactId);
+    } catch (_) {
+      _appendGroupFallbackReply(groupId, '【召唤失败】角色不存在');
+      return;
+    }
+
+    final personaText = await _fetchCharacterPersona(dio, contact);
+    final systemPrompt = personaText.isNotEmpty
+        ? '你正在群聊「${group.name}」里扮演 ${contact.name}。\n\n$personaText\n\n请用 ${contact.name} 的语气和性格自然地回复群里的最新消息，简短自然。'
+        : '你是 ${contact.name}，正在群聊「${group.name}」里发言。请用自然的语气回复群里的最新消息。';
+
+    final history = _buildGroupHistory(groupId);
+    final rawReply = await _callGroupChatApi(
+      dio: dio,
+      systemPrompt: systemPrompt,
+      historyMessages: history,
+      maxTokens: 800,
+    );
+    final cleaned = _replacePlaceholders(rawReply, contact.name).trim();
+
+    final ts = DateTime.now();
+    _appendMessage(
+      contactId: groupId,
+      message: ChatMessage(
+        id: '$groupId-$targetContactId-${ts.microsecondsSinceEpoch}',
+        contactId: targetContactId,
+        sender: ChatMessageSender.ai,
+        body: WordMessageBody(cleaned),
+        sentAt: ts,
+      ),
+      unreadCount: 0,
+    );
+  }
+
+  void _appendGroupFallbackReply(String groupId, String text) {
+    final ts = DateTime.now();
+    _appendMessage(
+      contactId: groupId,
+      message: ChatMessage(
+        id: '$groupId-fallback-${ts.microsecondsSinceEpoch}',
+        contactId: groupId,
+        sender: ChatMessageSender.ai,
+        body: WordMessageBody(text),
+        sentAt: ts,
+      ),
+      unreadCount: 0,
+    );
   }
 
   Future<void> loadPersistedGroups() async {
