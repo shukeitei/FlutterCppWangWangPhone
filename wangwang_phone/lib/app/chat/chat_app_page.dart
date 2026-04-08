@@ -12,6 +12,7 @@ import 'character_detail_page.dart';
 import 'chat_models.dart';
 import 'widgets/avatar_widget.dart';
 import 'widgets/chat_sidebar.dart';
+import 'widgets/group_avatar_widget.dart';
 import 'widgets/preset_widgets.dart';
 import 'pages/create_group_page.dart';
 import 'pages/persona_select_page.dart';
@@ -1265,6 +1266,7 @@ class _ChatThreadsTabState extends State<_ChatThreadsTab>
                         bottom: index == threads.length - 1 ? 0 : 6,
                       ),
                       child: _GroupThreadTile(
+                        controller: widget.controller,
                         group: group,
                         thread: thread,
                         onTap: () {
@@ -1365,28 +1367,16 @@ class _ChatThreadsTabState extends State<_ChatThreadsTab>
 
 class _GroupThreadTile extends StatelessWidget {
   const _GroupThreadTile({
+    required this.controller,
     required this.group,
     required this.thread,
     required this.onTap,
   });
 
+  final ChatAppController controller;
   final ChatGroup group;
   final ChatThread thread;
   final VoidCallback onTap;
-
-  Color _colorForGroup(String groupId) {
-    const palette = [
-      Color(0xFF79C77B),
-      Color(0xFF7E8DFF),
-      Color(0xFFFFA56C),
-      Color(0xFFFFC65C),
-      Color(0xFFEF7FB0),
-      Color(0xFF68B9D8),
-    ];
-    final index =
-        groupId.runes.fold<int>(0, (sum, rune) => sum + rune) % palette.length;
-    return palette[index];
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1400,10 +1390,6 @@ class _GroupThreadTile extends StatelessWidget {
         : palette.threadDividerColor;
     final tileColor =
         thread.isPinned ? palette.threadPinnedSurface : palette.threadSurface;
-
-    final firstChar = group.name.isNotEmpty
-        ? String.fromCharCode(group.name.runes.first)
-        : '群';
 
     return Material(
       color: Colors.transparent,
@@ -1421,13 +1407,10 @@ class _GroupThreadTile extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
-                _Avatar(
-                  color: _colorForGroup(group.id),
-                  label: firstChar,
+                GroupAvatarWidget(
+                  group: group,
+                  controller: controller,
                   size: 48,
-                  shadowOpacity: 0.14,
-                  shadowBlurRadius: 8,
-                  shadowOffset: const Offset(0, 4),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
