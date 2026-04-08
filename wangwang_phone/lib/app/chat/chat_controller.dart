@@ -1490,7 +1490,18 @@ Future<void> syncContactsFromBridge() async {
     if (msgs == null) return;
     final idx = msgs.indexWhere((m) => m.id == messageId);
     if (idx == -1) return;
-    msgs[idx] = msgs[idx].copyWith(body: WordMessageBody(newText));
+    final old = msgs[idx];
+    final newBody = WordMessageBody(newText);
+
+    if (old.alternatives.isNotEmpty) {
+      // 改写当前激活的那个版本；同步 body 字段保持 previewText / lastMessage 一致
+      final newAlts = List<ChatMessageBody>.from(old.alternatives);
+      newAlts[old.activeAltIndex] = newBody;
+      msgs[idx] = old.copyWith(body: newBody, alternatives: newAlts);
+    } else {
+      msgs[idx] = old.copyWith(body: newBody);
+    }
+
     if (idx == msgs.length - 1) {
       _threads[contactId] = _threads[contactId]!.copyWith(lastMessage: newText);
     }
@@ -1564,6 +1575,48 @@ Future<void> syncContactsFromBridge() async {
     if (freshMsgs != null &&
         freshMsgs.isNotEmpty &&
         freshMsgs.last.sender == ChatMessageSender.ai) {
+      final newMsg = freshMsgs.last;
+      alts.add(newMsg.body);
+      freshMsgs[freshMsgs.length - 1] = newMsg.copyWith(
+        alternatives: alts,
+        activeAltIndex: alts.length - 1,
+      );
+      notifyListeners();
+      await _saveMessages();
+    }
+  }
+
+  /// 群聊版 reroll：让最后一条 AI 消息的原作者再说一次，结果作为新 alt 追加
+  Future<void> rerollGroupLastReply({required String groupId}) async {
+    final msgs = _messages[groupId];
+    if (msgs == null || msgs.isEmpty) return;
+    final lastMsg = msgs.last;
+    if (lastMsg.sender != ChatMessageSender.ai) return;
+    // 系统消息（建群/重置提示）的 contactId == groupId，跳过
+    if (lastMsg.contactId == groupId) return;
+
+    final targetContactId = lastMsg.contactId;
+    final List<ChatMessageBody> alts = lastMsg.alternatives.isNotEmpty
+        ? List.from(lastMsg.alternatives)
+        : [lastMsg.body];
+
+    msgs.removeLast();
+    notifyListeners();
+
+    // 复用手动召唤路径：让原作者再说一次
+    await sendGroupMessage(
+      groupId: groupId,
+      text: '',
+      targetContactId: targetContactId,
+      summonOnly: true,
+    );
+
+    // sendGroupMessage 内部会 append，这里读最新引用
+    final freshMsgs = _messages[groupId];
+    if (freshMsgs != null &&
+        freshMsgs.isNotEmpty &&
+        freshMsgs.last.sender == ChatMessageSender.ai &&
+        freshMsgs.last.contactId == targetContactId) {
       final newMsg = freshMsgs.last;
       alts.add(newMsg.body);
       freshMsgs[freshMsgs.length - 1] = newMsg.copyWith(

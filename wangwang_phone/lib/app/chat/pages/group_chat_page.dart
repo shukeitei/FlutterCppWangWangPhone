@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../character_detail_page.dart';
 import '../chat_app_page.dart';
@@ -29,6 +30,36 @@ class _GroupChatPageState extends State<GroupChatPage> {
   final ScrollController _scrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   bool _waitingForSummon = false; // 手动模式下，发完消息后等待召唤
+  String? _editingMessageId;
+  final TextEditingController _editController = TextEditingController();
+  bool _multiSelectMode = false;
+  final Set<String> _selectedIds = {};
+
+  void _enterMultiSelect(String initialId) {
+    setState(() {
+      _editingMessageId = null;
+      _multiSelectMode = true;
+      _selectedIds.clear();
+      _selectedIds.add(initialId);
+    });
+  }
+
+  void _exitMultiSelect() {
+    setState(() {
+      _multiSelectMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelection(String messageId) {
+    setState(() {
+      if (_selectedIds.contains(messageId)) {
+        _selectedIds.remove(messageId);
+      } else {
+        _selectedIds.add(messageId);
+      }
+    });
+  }
 
   ChatAppController get controller => widget.controller;
 
@@ -48,6 +79,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
     controller.closeConversation(widget.groupId);
     _inputController.removeListener(_onInputChanged);
     _inputController.dispose();
+    _editController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -216,7 +248,10 @@ class _GroupChatPageState extends State<GroupChatPage> {
               bottom: false,
               child: Column(
                 children: [
-                  _buildHeader(palette, group),
+                  if (_multiSelectMode)
+                    _buildMultiSelectHeader(palette)
+                  else
+                    _buildHeader(palette, group),
                   if (controller.getGroupError(widget.groupId) != null)
                     _buildErrorBanner(palette),
                   Expanded(
@@ -239,13 +274,119 @@ class _GroupChatPageState extends State<GroupChatPage> {
                   ),
                   if (controller.isTyping(widget.groupId))
                     _buildTypingIndicator(palette),
-                  _buildInputBar(palette, hasDraftText, group),
+                  if (_multiSelectMode)
+                    _buildMultiSelectActionBar(palette)
+                  else
+                    _buildInputBar(palette, hasDraftText, group),
                 ],
               ),
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildMultiSelectHeader(ChatPalette palette) {
+    return Container(
+      decoration: BoxDecoration(
+        color: palette.surfaceColor,
+        border: Border(
+          bottom: BorderSide(color: palette.separatorColor),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          TextButton(
+            onPressed: _exitMultiSelect,
+            child: Text(
+              '取消',
+              style: TextStyle(
+                color: palette.secondaryText,
+                fontSize: 15,
+              ),
+            ),
+          ),
+          const Spacer(),
+          Text(
+            '已选 ${_selectedIds.length} 条',
+            style: TextStyle(
+              color: palette.primaryText,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          const SizedBox(width: 48),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMultiSelectActionBar(ChatPalette palette) {
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    final hasSelection = _selectedIds.isNotEmpty;
+    return Container(
+      decoration: BoxDecoration(
+        color: palette.surfaceColor,
+        border: Border(
+          top: BorderSide(color: palette.separatorColor),
+        ),
+      ),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 10,
+        bottom: bottomInset + 10,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _GroupMultiSelectAction(
+            icon: Icons.visibility_off_rounded,
+            label: '隐藏',
+            onTap: !hasSelection
+                ? null
+                : () {
+                    controller.batchToggleHideMessages(
+                      contactId: widget.groupId,
+                      messageIds: _selectedIds.toSet(),
+                      hide: true,
+                    );
+                    _exitMultiSelect();
+                  },
+          ),
+          _GroupMultiSelectAction(
+            icon: Icons.visibility_rounded,
+            label: '取消隐藏',
+            onTap: !hasSelection
+                ? null
+                : () {
+                    controller.batchToggleHideMessages(
+                      contactId: widget.groupId,
+                      messageIds: _selectedIds.toSet(),
+                      hide: false,
+                    );
+                    _exitMultiSelect();
+                  },
+          ),
+          _GroupMultiSelectAction(
+            icon: Icons.delete_outline_rounded,
+            label: '删除',
+            isDestructive: true,
+            onTap: !hasSelection
+                ? null
+                : () {
+                    controller.batchDeleteMessages(
+                      contactId: widget.groupId,
+                      messageIds: _selectedIds.toSet(),
+                    );
+                    _exitMultiSelect();
+                  },
+          ),
+        ],
+      ),
     );
   }
 
@@ -360,8 +501,25 @@ class _GroupChatPageState extends State<GroupChatPage> {
         body is WordMessageBody ? body.text : message.previewText;
     final bubble = controller.bubbleAppearance;
 
+    // 是否系统消息（建群/重置提示）
+    final isSystem = !isUser && message.contactId == widget.groupId;
+
+    // 是否最后一条 AI 消息（用于显示 alt 切换 + reroll）
+    final messages = controller.messagesFor(widget.groupId);
+    final isLastAi = !isUser &&
+        !isSystem &&
+        !_multiSelectMode &&
+        messages.isNotEmpty &&
+        messages.last.id == message.id;
+
+    // 编辑态（多选模式下忽略）
+    if (_editingMessageId == message.id && !_multiSelectMode) {
+      return _buildEditingBubble(palette, message, isUser);
+    }
+
+    Widget content;
     if (isUser) {
-      return Padding(
+      content = Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.end,
@@ -369,21 +527,24 @@ class _GroupChatPageState extends State<GroupChatPage> {
           children: [
             const SizedBox(width: 56),
             Flexible(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: bubble.userBubbleColor,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Text(
-                  text,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    height: 1.35,
+              child: Opacity(
+                opacity: message.isHidden ? 0.4 : 1.0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: bubble.userBubbleColor,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Text(
+                    text,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      height: 1.35,
+                    ),
                   ),
                 ),
               ),
@@ -391,84 +552,412 @@ class _GroupChatPageState extends State<GroupChatPage> {
           ],
         ),
       );
+    } else {
+      // AI/系统消息：左侧带角色头像 + 名字
+      ChatContact? authorContact;
+      if (!isSystem) {
+        try {
+          authorContact = controller.contactById(message.contactId);
+        } catch (_) {}
+      }
+      final authorName = authorContact?.name ?? '群消息';
+
+      content = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (authorContact != null)
+                  AvatarWidget(
+                    size: 32,
+                    fallbackColor: authorContact.avatarColor,
+                    fallbackText: authorContact.emoji,
+                    avatarUrl: authorContact.avatarUrl,
+                  )
+                else
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: palette.elevatedSurface,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      Icons.smart_toy_rounded,
+                      size: 18,
+                      color: palette.secondaryText,
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Opacity(
+                    opacity: message.isHidden ? 0.4 : 1.0,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4, bottom: 2),
+                          child: Text(
+                            authorName,
+                            style: TextStyle(
+                              color: palette.secondaryText,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: bubble.peerBubbleColor,
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Text(
+                            text,
+                            style: const TextStyle(
+                              color: Colors.black87,
+                              fontSize: 15,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 56),
+              ],
+            ),
+            if (isLastAi) _buildAltAndRerollBar(palette, message),
+          ],
+        ),
+      );
     }
 
-    // AI/系统消息：左侧带角色头像 + 名字
-    // 当前 message.contactId 有两种情况：
-    //   1) 系统消息：contactId == groupId（建群提示）
-    //   2) 后续多角色回复：contactId == 具体角色 id
-    ChatContact? authorContact;
-    if (message.contactId != widget.groupId) {
-      try {
-        authorContact = controller.contactById(message.contactId);
-      } catch (_) {}
-    }
-    final authorName = authorContact?.name ?? '群消息';
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (authorContact != null)
-            AvatarWidget(
-              size: 32,
-              fallbackColor: authorContact.avatarColor,
-              fallbackText: authorContact.emoji,
-              avatarUrl: authorContact.avatarUrl,
-            )
-          else
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: palette.elevatedSurface,
-                borderRadius: BorderRadius.circular(16),
-              ),
+    // 多选模式：前面加勾选圆圈，tap 切换选中
+    if (_multiSelectMode) {
+      final selected = _selectedIds.contains(message.id);
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _toggleSelection(message.id),
+        child: Row(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 4, right: 4, top: 12),
               child: Icon(
-                Icons.smart_toy_rounded,
+                selected
+                    ? Icons.check_circle
+                    : Icons.radio_button_unchecked,
+                color:
+                    selected ? Colors.orangeAccent : Colors.white38,
+                size: 22,
+              ),
+            ),
+            Expanded(child: content),
+          ],
+        ),
+      );
+    }
+
+    // 系统消息不给长按菜单
+    if (isSystem) return content;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPress: () => _showMessageActionSheet(message),
+      child: content,
+    );
+  }
+
+  Widget _buildAltAndRerollBar(ChatPalette palette, ChatMessage message) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 44, top: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (message.alternatives.length > 1) ...[
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: message.activeAltIndex > 0
+                  ? () => controller.switchAltVersion(
+                        contactId: widget.groupId,
+                        newIndex: message.activeAltIndex - 1,
+                      )
+                  : null,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.chevron_left_rounded,
+                  size: 18,
+                  color: message.activeAltIndex > 0
+                      ? palette.secondaryText
+                      : palette.secondaryText.withValues(alpha: 0.3),
+                ),
+              ),
+            ),
+            Text(
+              '${message.activeAltIndex + 1}/${message.alternatives.length}',
+              style: TextStyle(color: palette.secondaryText, fontSize: 12),
+            ),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: message.activeAltIndex < message.alternatives.length - 1
+                  ? () => controller.switchAltVersion(
+                        contactId: widget.groupId,
+                        newIndex: message.activeAltIndex + 1,
+                      )
+                  : null,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: message.activeAltIndex <
+                          message.alternatives.length - 1
+                      ? palette.secondaryText
+                      : palette.secondaryText.withValues(alpha: 0.3),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () =>
+                controller.rerollGroupLastReply(groupId: widget.groupId),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(
+                Icons.refresh_rounded,
                 size: 18,
                 color: palette.secondaryText,
               ),
             ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(left: 4, bottom: 2),
-                  child: Text(
-                    authorName,
-                    style: TextStyle(
-                      color: palette.secondaryText,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: bubble.peerBubbleColor,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Text(
-                    text,
-                    style: TextStyle(
-                      color: Colors.black87,
-                      fontSize: 15,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
-              ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditingBubble(
+      ChatPalette palette, ChatMessage message, bool isUser) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: isUser ? 48 : 12,
+        right: isUser ? 12 : 48,
+        top: 4,
+        bottom: 4,
+      ),
+      child: Column(
+        crossAxisAlignment:
+            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF2A2A3A),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.orangeAccent.withValues(alpha: 0.6),
+                width: 1.5,
+              ),
+            ),
+            child: TextField(
+              controller: _editController,
+              autofocus: true,
+              maxLines: null,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                height: 1.45,
+              ),
+              decoration: const InputDecoration(
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                border: InputBorder.none,
+              ),
             ),
           ),
-          const SizedBox(width: 56),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton(
+                onPressed: () => setState(() => _editingMessageId = null),
+                child: const Text(
+                  '取消',
+                  style: TextStyle(color: Colors.white54),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () {
+                  final newText = _editController.text.trim();
+                  if (newText.isNotEmpty) {
+                    controller.editMessage(
+                      contactId: widget.groupId,
+                      messageId: message.id,
+                      newText: newText,
+                    );
+                  }
+                  setState(() => _editingMessageId = null);
+                },
+                style: TextButton.styleFrom(
+                  backgroundColor:
+                      Colors.orangeAccent.withValues(alpha: 0.2),
+                ),
+                child: const Text(
+                  '确认',
+                  style: TextStyle(color: Colors.orangeAccent),
+                ),
+              ),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  void _showMessageActionSheet(ChatMessage message) {
+    final palette = ChatPalette.of(context);
+    final isHidden = message.isHidden;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: palette.surfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.copy_rounded, color: palette.primaryText),
+              title:
+                  Text('复制', style: TextStyle(color: palette.primaryText)),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                final body = message.activeBody;
+                final text = body is WordMessageBody
+                    ? body.text
+                    : message.previewText;
+                Clipboard.setData(ClipboardData(text: text));
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.edit_rounded, color: palette.primaryText),
+              title:
+                  Text('改写', style: TextStyle(color: palette.primaryText)),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                final body = message.activeBody;
+                final currentText = body is WordMessageBody
+                    ? body.text
+                    : message.previewText;
+                setState(() {
+                  _editingMessageId = message.id;
+                  _editController.text = currentText;
+                });
+              },
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.replay_rounded, color: Colors.orange),
+              title:
+                  Text('回溯', style: TextStyle(color: palette.primaryText)),
+              subtitle: Text(
+                '删除这条及之后所有消息',
+                style:
+                    TextStyle(color: palette.secondaryText, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                showDialog(
+                  context: context,
+                  builder: (dCtx) => AlertDialog(
+                    backgroundColor: palette.surfaceColor,
+                    title: Text(
+                      '回溯确认',
+                      style: TextStyle(color: palette.primaryText),
+                    ),
+                    content: Text(
+                      '将删除这条消息及之后的所有消息，不可恢复。',
+                      style: TextStyle(color: palette.secondaryText),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dCtx),
+                        child: const Text('取消'),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pop(dCtx);
+                          controller.rollbackToMessage(
+                            contactId: widget.groupId,
+                            messageId: message.id,
+                          );
+                        },
+                        child: const Text(
+                          '确认回溯',
+                          style: TextStyle(color: Colors.redAccent),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.delete_outline_rounded,
+                color: Colors.redAccent,
+              ),
+              title:
+                  Text('删除', style: TextStyle(color: palette.primaryText)),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                controller.deleteMessage(
+                  contactId: widget.groupId,
+                  messageId: message.id,
+                );
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                isHidden
+                    ? Icons.visibility_rounded
+                    : Icons.visibility_off_rounded,
+                color: palette.primaryText,
+              ),
+              title: Text(
+                isHidden ? '取消隐藏' : '隐藏',
+                style: TextStyle(color: palette.primaryText),
+              ),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                controller.toggleHideMessage(
+                  contactId: widget.groupId,
+                  messageId: message.id,
+                );
+              },
+            ),
+            ListTile(
+              leading:
+                  Icon(Icons.checklist_rounded, color: palette.primaryText),
+              title: Text('多选',
+                  style: TextStyle(color: palette.primaryText)),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _enterMultiSelect(message.id);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
@@ -1053,6 +1542,45 @@ class _GroupChatPageState extends State<GroupChatPage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _GroupMultiSelectAction extends StatelessWidget {
+  const _GroupMultiSelectAction({
+    required this.icon,
+    required this.label,
+    this.isDestructive = false,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool isDestructive;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    final color = !enabled
+        ? Colors.white24
+        : isDestructive
+            ? Colors.redAccent
+            : Colors.white70;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 4),
+            Text(label, style: TextStyle(color: color, fontSize: 12)),
+          ],
+        ),
       ),
     );
   }

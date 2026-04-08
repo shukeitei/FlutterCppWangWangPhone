@@ -574,6 +574,7 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                             message.sender == ChatMessageSender.ai &&
                                 index == messages.length - 1;
                         return _ChatMessageBubble(
+                          key: ValueKey(message.id),
                           controller: widget.controller,
                           message: message,
                           bubbleAppearance: bubbleAppearance,
@@ -2696,6 +2697,7 @@ class _ChatIconButton extends StatelessWidget {
 
 class _ChatMessageBubble extends StatefulWidget {
   const _ChatMessageBubble({
+    super.key,
     required this.controller,
     required this.message,
     required this.bubbleAppearance,
