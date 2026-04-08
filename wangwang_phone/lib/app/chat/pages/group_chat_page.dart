@@ -238,6 +238,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
               child: Column(
                 children: [
                   _buildHeader(palette, group),
+                  if (controller.getGroupError(widget.groupId) != null)
+                    _buildErrorBanner(palette),
                   Expanded(
                     child: messages.isEmpty
                         ? Center(
@@ -256,6 +258,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
                             },
                           ),
                   ),
+                  if (controller.isTyping(widget.groupId))
+                    _buildTypingIndicator(palette),
                   _buildInputBar(palette, hasDraftText, group),
                 ],
               ),
@@ -617,6 +621,64 @@ class _GroupChatPageState extends State<GroupChatPage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildTypingIndicator(ChatPalette palette) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: palette.secondaryText,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '角色正在回复…',
+            style: TextStyle(color: palette.secondaryText, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorBanner(ChatPalette palette) {
+    final message = controller.getGroupError(widget.groupId)!;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: Colors.redAccent.withValues(alpha: 0.15),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded,
+              size: 16, color: Colors.redAccent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.redAccent,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => controller.clearGroupError(widget.groupId),
+            child: const Icon(
+              Icons.close_rounded,
+              size: 16,
+              color: Colors.redAccent,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

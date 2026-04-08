@@ -189,6 +189,14 @@ class ChatAppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? getGroupError(String groupId) => _groupError[groupId];
+
+  void clearGroupError(String groupId) {
+    if (_groupError.remove(groupId) != null) {
+      notifyListeners();
+    }
+  }
+
   /// 群聊发消息 / 召唤角色发言。
   /// - 随机模式 + summonOnly=false：追加用户消息 → 自动触发 AI 接力（步骤 8 接入）
   /// - 手动模式 + summonOnly=false：只追加用户消息，不触发 AI，等召唤
@@ -235,6 +243,7 @@ class ChatAppController extends ChangeNotifier {
     }
 
     _typingContacts.add(groupId);
+    _groupError.remove(groupId);
     notifyListeners();
 
     try {
@@ -249,6 +258,7 @@ class ChatAppController extends ChangeNotifier {
       }
       await _saveMessages();
     } catch (e) {
+      _groupError[groupId] = '$e';
       _appendGroupFallbackReply(groupId, '【信号中断】$e');
     } finally {
       _typingContacts.remove(groupId);
@@ -419,7 +429,7 @@ ${memberProfiles.join('\n\n')}
       final replyText = (entry['reply'] as String?)?.trim() ?? '';
       if (name.isEmpty || replyText.isEmpty) continue;
 
-      // 把 name 映射回 contactId
+      // 把 name 映射回 contactId：先精确匹配，再模糊包含（AI 可能返回去前缀的名字）
       String? replyContactId;
       for (final cid in group.memberContactIds) {
         try {
@@ -428,6 +438,17 @@ ${memberProfiles.join('\n\n')}
             break;
           }
         } catch (_) {}
+      }
+      if (replyContactId == null) {
+        for (final cid in group.memberContactIds) {
+          try {
+            final contactName = contactById(cid).name;
+            if (contactName.contains(name) || name.contains(contactName)) {
+              replyContactId = cid;
+              break;
+            }
+          } catch (_) {}
+        }
       }
 
       final ts = DateTime.now();
@@ -557,6 +578,7 @@ ${memberProfiles.join('\n\n')}
   final Map<String, ChatContextBundle> _lastContextBundles = {};
   final Map<String, ChatGroup> _groups = {};
   final Map<String, bool> _groupRandomMode = {}; // groupId -> true=随机, false=手动；默认 true
+  final Map<String, String> _groupError = {}; // groupId -> 最近一次 AI 调用错误
   ChatBubbleAppearance _bubbleAppearance;
   List<Map<String, dynamic>> _personas = [];
   String _globalPersonaId = '';
