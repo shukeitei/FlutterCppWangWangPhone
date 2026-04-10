@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'chat_controller.dart';
 import 'chat_models.dart';
@@ -99,6 +100,13 @@ class CharacterDetailPage extends StatelessWidget {
                       child: _WorldBindingCard(
                         controller: controller,
                         contact: contact,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    _buildSection(
+                      title: '高级设定',
+                      child: _AdvancedSettingsCard(
+                        contactName: contact.name,
                       ),
                     ),
                     const SizedBox(height: 40),
@@ -274,6 +282,310 @@ class _PersonaSummaryCardState extends State<_PersonaSummaryCard> {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _AdvancedSettingsCard extends StatefulWidget {
+  const _AdvancedSettingsCard({required this.contactName});
+  final String contactName;
+
+  @override
+  State<_AdvancedSettingsCard> createState() => _AdvancedSettingsCardState();
+}
+
+class _AdvancedSettingsCardState extends State<_AdvancedSettingsCard> {
+  bool _expanded = false;
+  bool _loading = false;
+  Map<String, dynamic>? _charData;
+
+  Future<void> _fetchData() async {
+    if (_charData != null || _loading) return;
+    setState(() => _loading = true);
+    try {
+      final res = await Dio().get(
+        '$kBridgeHost/characters/${Uri.encodeComponent(widget.contactName)}',
+      );
+      if (mounted) setState(() => _charData = res.data as Map<String, dynamic>);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fields = _buildFields();
+    // 收起时的摘要
+    final summary = fields
+        .where((f) => f.length > 0)
+        .map((f) => '${f.label} ${f.length}字')
+        .join(' · ');
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A26),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          // 点击头部展开/收起
+          InkWell(
+            borderRadius: _expanded
+                ? const BorderRadius.vertical(top: Radius.circular(12))
+                : BorderRadius.circular(12),
+            onTap: () {
+              setState(() => _expanded = !_expanded);
+              if (_expanded) _fetchData();
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.psychology_outlined,
+                      color: Colors.purpleAccent,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '角色卡高级定义',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (!_expanded && summary.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            summary,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 11,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    _expanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: Colors.white38,
+                    size: 22,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 展开内容
+          if (_expanded) ...[
+            const Divider(height: 1, color: Color(0xFF2A2A3A)),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.purpleAccent,
+                    ),
+                  ),
+                ),
+              )
+            else
+              ...fields.map((f) => _FieldTile(field: f)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  List<_FieldInfo> _buildFields() {
+    final d = _charData;
+    if (d == null) return [];
+    final dp = d['depth_prompt'] as Map<String, dynamic>? ?? {};
+    final dpPrompt = dp['prompt'] as String? ?? '';
+    final dpDepth = dp['depth'] as int? ?? 4;
+    final dpRole = dp['role'] as String? ?? 'system';
+
+    return [
+      _FieldInfo(
+        label: '性格设定',
+        tag: 'personality',
+        content: d['personality'] as String? ?? '',
+      ),
+      _FieldInfo(
+        label: '对话示例',
+        tag: 'mes_example',
+        content: d['mes_example'] as String? ?? '',
+      ),
+      _FieldInfo(
+        label: '系统提示词',
+        tag: 'system_prompt',
+        content: d['system_prompt'] as String? ?? '',
+      ),
+      _FieldInfo(
+        label: '后置指令',
+        tag: 'post_history',
+        content: d['post_history_instructions'] as String? ?? '',
+      ),
+      _FieldInfo(
+        label: '深度提示词',
+        tag: 'depth_prompt',
+        content: dpPrompt,
+        meta: dpPrompt.isNotEmpty ? 'depth=$dpDepth  role=$dpRole' : null,
+      ),
+    ];
+  }
+}
+
+class _FieldInfo {
+  const _FieldInfo({
+    required this.label,
+    required this.tag,
+    required this.content,
+    this.meta,
+  });
+  final String label;
+  final String tag;
+  final String content;
+  final String? meta;
+
+  int get length => content.length;
+}
+
+class _FieldTile extends StatefulWidget {
+  const _FieldTile({required this.field});
+  final _FieldInfo field;
+
+  @override
+  State<_FieldTile> createState() => _FieldTileState();
+}
+
+class _FieldTileState extends State<_FieldTile> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final f = widget.field;
+    final isEmpty = f.content.isEmpty;
+
+    return Column(
+      children: [
+        InkWell(
+          onTap: isEmpty ? null : () => setState(() => _open = !_open),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                Text(
+                  f.label,
+                  style: TextStyle(
+                    color: isEmpty ? Colors.white30 : Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (isEmpty)
+                  const Text(
+                    '未设置',
+                    style: TextStyle(color: Colors.white24, fontSize: 11),
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.purpleAccent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${f.length}字',
+                      style: const TextStyle(
+                        color: Colors.purpleAccent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                if (f.meta != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    f.meta!,
+                    style: const TextStyle(
+                      color: Colors.white38,
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                if (!isEmpty)
+                  Icon(
+                    _open
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    color: Colors.white30,
+                    size: 18,
+                  ),
+              ],
+            ),
+          ),
+        ),
+        if (_open && !isEmpty)
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxHeight: 200),
+            margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF12121C),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Scrollbar(
+              child: SingleChildScrollView(
+                child: Text(
+                  f.content,
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                    height: 1.6,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (!isEmpty)
+          const Divider(
+            height: 1,
+            color: Color(0xFF2A2A3A),
+            indent: 14,
+            endIndent: 14,
+          ),
+      ],
     );
   }
 }

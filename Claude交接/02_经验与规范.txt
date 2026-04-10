@@ -1,0 +1,341 @@
+# 开发经验与规范
+
+## 每次启动汪汪机的完整步骤
+
+### 前置检查
+```bash
+# 1. 确认手机和 Mac 连在同一个 WiFi 频段（都连 5G 或都连 2.4G）
+# 2. 确认 Mac 当前 IP
+ifconfig | grep 192.168
+# 3. 如果 IP 变了，改 chat_controller.dart 第15行的 kBridgeHost
+#    例如：const String kBridgeHost = 'http://192.168.1.247:7700';
+```
+
+### 启动三件套
+```bash
+# 第一步：启动 ST（桥接服务会跟着自动启动）
+cd /Users/apple/Desktop/SillyTavern-Launcher
+bash launcher.sh
+
+# 第二步：验证桥接服务正常（另开一个终端窗口）
+curl http://192.168.1.247:7700/characters | head -c 100
+curl http://192.168.1.247:7700/personas | head -c 100
+# 两个都有输出说明桥接服务正常
+
+# 第三步：启动 Flutter 项目
+cd ~/Developer/FlutterCppWangWangPhone/wangwang_phone
+flutter run
+```
+
+### 如果桥接服务没自动启动
+```bash
+# 检查是否在运行
+ps aux | grep wangwang_bridge
+
+# 检查端口是否被占用
+lsof -i :7700
+
+# 如果端口被占但服务没响应，杀掉重启
+lsof -i :7700 | awk 'NR>1{print $2}' | xargs kill 2>/dev/null
+sleep 1
+python3 ~/Developer/wangwang_bridge.py &
+```
+
+### 如果联系人列表为空
+```bash
+# 按顺序排查：
+# 1. 手机和 Mac 是否在同一 WiFi 频段？（最常见原因！）
+# 2. Mac IP 是否变了？ifconfig | grep 192.168
+# 3. 桥接服务是否在跑？curl http://localhost:7700/characters | head -c 100
+# 4. kBridgeHost 常量是否指向正确 IP？
+grep 'kBridgeHost' ~/Developer/FlutterCppWangWangPhone/wangwang_phone/lib/app/chat/chat_controller.dart
+```
+
+### 群聊 AI 返回 JSON 的容错
+- AI 经常不听话，返回 ```json 包裹、前面加废话、格式不严格
+- 必须做多层容错：剥 markdown → 正则提取 → 直接解析 → fallback 原文显示
+- system prompt 末尾要强调"不要任何解释、前缀或 markdown 格式"
+- 角色名匹配也要容错：AI 可能返回简称（"周墨白"而非"NPC周墨白"）
+
+### 群聊系统消息污染 AI 上下文
+- "对话已重置"等群系统消息如果喂给 AI，AI 会学习模仿以"群消息"身份发言
+- _buildGroupHistory 里必须过滤掉 sender==ai && contactId==groupId 的消息
+
+### 手动召唤 vs @选人说话
+- 最初设计是"@某人=我要对他说话"，后来改为"@某人=召唤他出来发言"
+- 召唤模式更合理：用户先发消息，再决定谁来回复，而不是在发消息前选目标
+- 引用功能可以覆盖"我想对他说话"的需求
+
+### 群消息持久化的执行顺序
+- loadPersistedGroups() 必须在 loadPersistedMessages() 之前
+- 否则 _messages 里没有 groupId 的 key，群消息恢复时被跳过
+- loadPersistedMessages 里对不存在的 key 要创建空列表而非 continue
+
+---
+
+## 避坑指南（血泪总结）
+
+### WiFi 频段隔离
+- **症状**：手机连不上桥接服务，联系人列表为空
+- **原因**：Mac 连 2.4G WiFi，手机连 5G WiFi（或反过来），路由器开了频段隔离
+- **解决**：两台设备必须连同一个频段，或者关闭路由器的频段隔离功能
+
+### Mac IP 会变
+- **症状**：之前能用的 IP 突然连不上
+- **原因**：DHCP 分配的 IP 不固定，重启路由器或 Mac 后可能变
+- **解决**：`ifconfig | grep 192.168` 查当前 IP，改 kBridgeHost 常量
+- **长期方案**：路由器里给 Mac 绑定静态 IP
+
+### Android 不支持 .local 主机名
+- **症状**：用 `appledeMacBook-Pro.local` 代替 IP 后手机完全连不上
+- **原因**：Android 的 mDNS 解析不可靠，不像 Mac/iOS 那样稳定支持 Bonjour
+- **结论**：只能用 IP 地址，不要用 .local
+
+### 端口被占用（Address already in use）
+- **症状**：`python3 wangwang_bridge.py` 报 OSError: [Errno 48]
+- **原因**：旧进程还占着 7700 端口
+- **解决**：`lsof -i :7700 | awk 'NR>1{print $2}' | xargs kill` 然后重启
+
+### ST settings.json 的 persona 路径
+- **正确路径**：`settings['power_user']['personas']` 和 `settings['power_user']['persona_descriptions']`
+- **不是**顶层的 `settings['personas']`
+- 被这个坑了一次，/personas 返回空数组
+
+### replace_all 替换陷阱
+- 把旧变量名全局替换为新变量名时，如果新变量是从旧变量派生的，派生行也会被替换导致自引用
+- 例：`_sortedPresets = List.from(widget.presets)` 被替换成 `_sortedPresets = List.from(_sortedPresets)` → LateInitializationError
+- 正确做法：用带上下文的定向 Edit，不要用全局 replace_all
+
+### final Map 持久化恢复
+- final Map 不能重新赋值，load 时用 `map..clear()..addAll(...)` 而非 `map = Map.from(...)`
+
+### 两层数据分离原则
+- 服务端数据（ST 预设本体、词条内容）= 实时拉取，不缓存
+- 本地用户意图（开关偏好、选择偏好）= 持久化到本地 JSON
+- resolvePromptEnabled 优先级：单聊覆盖 > 全局覆盖 > ST 原始
+- 同样适用于未来的世界书 enabled 状态、自定义 prompt 注入等
+
+
+### 历史遗留死代码
+- _buildAiReplyPayloads（约100行）：早期模拟 AI 回复，deepseek 接入后废弃，未删
+- _refreshDynamicSummary：未被引用的早期摘要方法
+- _openBubbleAppearanceSheet：气泡外观面板入口方法未被引用
+- 以上不影响功能，有空清理即可
+
+
+### API Key 安全
+- 永远不要把 API key 硬编码在源码里，项目是开源的
+- key 存 shared_preferences，运行时从本地读取
+- Claude API 格式与 OpenAI 不同：用 x-api-key header，响应是 content[].text
+- Gemini 用 OpenAI 兼容接口，走通用分支即可
+
+### UI 颜色禁止硬编码
+- 聊天气泡内所有前景元素（图标、文字）禁止用 Colors.whiteXX / blackXX
+- 必须从 ChatPalette.of(context) 取色
+- 新增 UI 元素至少在深色+浅色两种气泡主题下肉眼验证
+
+### 桥接服务卡死的排查
+- BaseHTTPServer 是单线程，任何 handler 阻塞就全挂
+- 端口还在但 curl 返回 Empty reply → 直接 kill + 重启，不用读代码
+- lsof -i :7700 查进程，kill 掉再 python3 wangwang_bridge.py &
+
+---
+
+## 代码修改规范
+
+### Dart 函数位置规则
+- 新函数必须放在 class 内部、其他函数的同级位置
+- 绝对不能把函数定义放进构造函数或另一个函数的花括号里
+- 构造函数体（最后的 { } 块）里只放函数调用，不放函数定义
+
+### 精确插入原则（重要！）
+- **不要整块替换大函数**，之前替换整个 sendTextMessage 导致类结构被打乱，大量方法找不到
+- 正确做法：精确定位到要改的那几行，只插入/修改那几行
+- Claude Code 的指令要写清楚"在 xxx 这行后面插入"或"把 xxx 替换为 yyy"
+
+### 代码恢复方法
+- 单文件恢复：`git checkout wangwang_phone/lib/app/chat/chat_controller.dart`
+- 注意路径要从 git 根目录算起，包含 wangwang_phone/ 前缀
+
+### 代码修改流程
+1. 在 VS Code 里修改文件
+2. 终端切到 wangwang_phone 目录
+3. 按 r 热重载（小改动），按 R 完整重启（结构性改动）
+4. 改完后提交到 GitHub：
+   ```
+   cd ~/Developer/FlutterCppWangWangPhone
+   git add -A
+   git commit -m "说明改了什么"
+   git push origin main
+   ```
+
+---
+
+## 架构经验
+
+### 为什么不走 ST 中转
+ST 本身不暴露 /v1/chat/completions 接口，它只是一个前端界面。
+汪汪机直接调 DeepSeek API，ST 只作为角色卡数据来源。
+
+### 角色卡数据格式
+ST 角色卡是 PNG 文件，人设 JSON 嵌入在 PNG 的 tEXt chunk 里，
+经过 Base64 编码。主要字段：name, description, personality, scenario, first_mes, character_book
+
+### Persona 数据格式
+存在 settings.json → power_user 下：
+- power_user.personas = {头像文件名: 显示名字}
+- power_user.persona_descriptions = {头像文件名: {description: 完整人设文本}}
+- 所有 persona 都叫"江栩栩"但对应不同世界线/年龄/背景
+
+### Persona 绑定存储
+- 绑定关系存在 ~/Developer/persona_bindings.json
+- 格式：{"角色名": "persona头像文件名"}
+- 全局默认存在手机的 shared_preferences（key: global_persona_id）
+
+### 消息持久化逻辑
+- 存储路径：手机的 getApplicationDocumentsDirectory()/wangwang_messages.json
+- 触发时机：用户发消息后立刻存一次，AI 回复后再存一次
+- 重要：syncContactsFromBridge 执行完之后才能调 loadPersistedMessages
+
+### 占位符替换
+- _replacePlaceholders(text, charName, userName) — userName 可选，默认"江栩栩"
+- 在拼 system prompt 前替换角色卡内容
+- 在 AI 回复后也做一次替换，防止 AI 输出原始 {{user}}
+
+## 桥接服务注意事项
+- 桥接服务跟 ST 的 launcher.sh 绑定，ST 启动时自动启动
+- 修改 wangwang_bridge.py 后需要重启 ST（或手动 kill 再重启）
+- 当前接口一览：
+  - GET /characters — 所有角色卡列表
+  - GET /characters/<名字> — 单个角色卡详情
+  - GET /personas — 所有 persona 列表
+  - GET /persona_binding/<角色名> — 查询某角色绑定的 persona
+  - POST /persona_binding — 设置绑定 {"character": "xxx", "persona_id": "xxx"}
+  - GET /bindings — 查看所有绑定关系
+
+### 头像接口
+- GET /avatar/<文件名.png> — 返回角色卡 PNG 图片（带或不带 .png 后缀都行）
+- GET /persona_avatar/<persona_id> — 返回 persona 头像（persona_id 就是头像文件名）
+- _serve_image 支持 png/jpg/gif/webp，返回 Cache-Control: max-age=3600
+- User Avatars 目录路径：data/default-user/User Avatars/（注意有空格）
+
+### 桥接服务接口一览（更新版）
+- GET /characters — 所有角色卡列表
+- GET /characters/<名字> — 单个角色卡详情
+- GET /personas — 所有 persona 列表
+- GET /persona_binding/<角色名> — 查询 persona 绑定
+- POST /persona_binding — 设置绑定
+- GET /bindings — 查看所有绑定
+- GET /avatar/<文件名> — 角色头像
+- GET /persona_avatar/<persona_id> — persona 头像
+- GET /presets — 所有预设列表（名称 + 词条数 + 启用数）
+- GET /presets/<名称> — 预设详情（prompts + prompt_order + 参数）
+
+### 预设系统设计原则
+- ST 预设文件只读，手机端开关状态存 ~/Developer/preset_overrides.json
+- 合并逻辑：ST 原始开关 → 全局 override → 单聊 override
+- 预设文件在 data/default-user/context/ 目录
+- 上下文调试页是"最终 prompt 预览器"，不再维护独立的死数据
+- 聊天设置弹窗位置：原气泡设置按钮处（左侧调参图标），气泡设置移到右侧图标
+
+### ST 预设文件的真实位置
+- **预设（prompt 词条）在 `OpenAI Settings/` 目录**，不是 `context/` 目录
+- `context/` 目录放的是指令格式模板（ChatML、Alpaca 这些），不是用户的 prompt 预设
+- 预设 JSON 里关键字段：`prompts`（词条定义数组）、`prompt_order`（排序 + 开关状态）
+- prompt_order[0]（character_id: 100000）= 系统内置 marker 顺序
+- prompt_order[1]（character_id: 100001）= 自定义词条排序 + enabled 开关
+
+### Flutter BottomSheet 溢出问题
+- BottomSheet 里内容变多时（如展开词条列表），容易 overflow
+- 解决方案：用 SingleChildScrollView 包裹内容 Column，加 isScrollControlled: true
+- 词条列表不要用 ConstrainedBox + ListView（高度被截断），直接用 Column 让内容撑开，滚动交给外层
+
+### GestureDetector 点击区域
+- 小按钮（如折叠箭头）必须加 behavior: HitTestBehavior.opaque
+- 否则只有图标本身的像素区域能响应点击，旁边的空白点了没反应
+- Padding 要给够（vertical: 14+），手指触摸区域至少 44px
+
+### _messages 列表的 mutable/immutable 混用问题
+- _appendMessage 每次用 List.from() 创建新列表赋回 _messages[contactId]（immutable 风格）
+- deleteMessage/editMessage 等直接 mutate 原列表（mutable 风格）
+- 两种风格混用时，如果 mutate 期间有外部调用触发了 _appendMessage，旧引用会脱钩
+- rerollLastReply 踩过这个坑：中间调 _triggerAiReply 导致列表被替换
+- 解决方案：在异步操作后重新读取 _messages[contactId]，不要持有跨异步的旧引用
+- 未来建议统一风格，但目前先不动避免扩大影响
+
+### ListView.builder 里的 StatefulWidget 必须传 ValueKey
+- **症状**：编辑/改写消息后保存，改到了别的消息上；或编辑态莫名消失/跳到其他气泡
+- **原因**：Flutter 按 index 复用 Element + State。列表因 reroll/新消息重建时，旧 State（含 _isEditing、_editController.text）挂到新 message 上
+- **解决**：构造 StatefulWidget 时传 `key: ValueKey(message.id)`，构造器加 `super.key`
+- **规则**：所有放在 ListView.builder / SliverList 里的 StatefulWidget 都必须传 ValueKey
+
+### editMessage 必须感知 alternatives
+- **症状**：reroll 后切到非 0 版本改写，界面看着改了但刷新后恢复原样
+- **原因**：editMessage 只改 body 字段，activeBody 返回的是 alternatives[activeAltIndex]，两者不同步
+- **规则**：任何修改消息内容的方法（editMessage、未来的翻译/润色等）都必须判断 alternatives.isNotEmpty，同时更新 alternatives[activeAltIndex] 和 body
+
+### 群聊 switchAltVersion 传 groupId 不是 message.contactId
+- **原因**：switchAltVersion 的第一个参数是 _messages 的 key；群聊里 key 是 groupId，而 message.contactId 是具体角色 id
+- **规则**：群聊里调用任何以 contactId 为 key 操作 _messages 的 controller 方法时，都传 groupId
+
+### ST 角色卡 v2/v3 的 data.* 结构
+- v2/v3 角色卡的权威数据在 `data.*` 下，顶层字段是 v1 兼容镜像（v2/v3 常为空）
+- extract_character 必须用 `d = data.get('data', data)` 优先读 data 层
+- ccv3 卡可能用 iTXt chunk 而非 tEXt，解析时需兼容
+
+### 世界书数据来源（三个，但 Primary 读不到）
+- settings.json → world_info_settings.world_info.globalSelect（全局世界书）
+- settings.json → world_info_settings.world_info.charLore（角色额外世界书）
+- ST 的 Primary Lorebook 绑定存在浏览器端，磁盘读不到
+- 世界书文件本身都在 data/default-user/worlds/ 目录，JSON 格式
+- entries 是 dict（key 是数字字符串），不是 list
+
+### 群聊 prompt 与预设冲突
+- 单角色叙事型预设（如 beilu 32k 字）会让群聊输出多角色旁白段落
+- 群聊建议用专门的短回复预设
+- extractPresetInstructions 只抽非 marker 词条，marker 词条群随机模式下跳过（无单角色数据填充）
+
+---
+
+## 2026年4月11日新增经验
+
+### DeepSeek API 消息格式严格要求
+- **连续同 role 消息会 400**：DeepSeek 要求 messages 严格 user/assistant 交替
+- **system 只能在首条**：中间插入 system 消息（如 depth_prompt）会被拒绝
+- **解决方案**：发送前用 _mergeConsecutiveRoles 做合规化处理（非首条 system→user，连续同 role 合并）
+- **群聊是重灾区**：多角色回复天然产生连续 assistant 消息，当前合并方案在第二次触发时仍有问题
+
+### deepseek-reasoner 不支持 assistant prefill
+- ST 用 `prefix: true` 在 assistant 消息上引导输出格式（如 `beilu开始创作：<｜end▁of▁thinking｜>`）
+- deepseek-reasoner 发这种消息直接返回 400
+- 当前做法：`!_apiModelId.contains('reasoner')` 时跳过 prefill
+- deepseek-chat 等其他模型可以正常使用 prefill
+
+### 预设词条的 role 字段很重要
+- PresetPromptEntry 有 `role` 字段（system/assistant/user）
+- 之前 assembleSystemPrompt 忽略了 role，所有词条都塞进 system prompt
+- 修复后：role='assistant' 的词条作为 prefill 提取，不混入 system prompt
+- 这是 ST 的 prefill 内容来源——预设里 role=assistant 的启用词条
+
+### ST 的 prompt 拼装有 chatHistory 分水岭
+- ST 预设有一个 `chatHistory` marker
+- chatHistory 之前的内容 → system message
+- chatHistory 之后的内容 → user message（附加在用户最新输入之后）
+- 汪汪机目前把所有内容都塞进 system，这是待修复项
+
+### 角色卡 v2/v3 字段优先级
+- v2/v3 卡权威数据在 `data.*`，顶层是 v1 兼容镜像（常为空）
+- `extract_character()` 必须先找 data 层再 fallback 顶层
+- iTXt chunk 是 ccv3 卡的常见格式，必须支持（之前只读 tEXt）
+
+### Dump 调试法非常有效
+- 在 API 请求前把完整 requestData 写到手机文件
+- `adb pull` 拉回来用 Python 分析
+- 比看 debugPrint 日志高效得多（release 模式 debugPrint 不输出）
+- 写到 `/sdcard/Download/`（需要存储权限），app 内部目录 release 模式拿不出来
+
+### 采样参数独立于 ST
+- 汪汪机直接调 API，不走 ST
+- 采样参数（temperature/penalties）在汪汪机端独立配置
+- 默认值可参考 ST 的配置，但不需要同步
+- SharedPreferences 存储，key 以 `ai_` 前缀

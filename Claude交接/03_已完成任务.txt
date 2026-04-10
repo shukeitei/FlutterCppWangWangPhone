@@ -1,0 +1,280 @@
+# 已完成任务记录
+
+## 2026年3月28日
+
+### 1. 基础通道打通
+- 修复 403 错误：发现 ST 不暴露 API，改为直接调用 DeepSeek API
+- 修复 404 错误：确认路径和请求格式
+- 实现第一次成功 AI 回复
+
+### 2. ST 角色卡自动同步
+- 编写桥接服务 wangwang_bridge.py（Python HTTP 服务，端口 7700）
+- 实现从 ST 角色卡 PNG 提取 Base64 编码的人设 JSON
+- 汪汪机启动时自动从桥接服务拉取角色列表，动态生成联系人
+- 替换掉硬编码的阿梨、月见、糯糯、橘子
+
+### 3. 对话历史传递
+- 每次发消息时携带最近 100 条历史记录给 DeepSeek
+- AI 具备对话记忆能力
+
+### 4. 消息持久化
+- 实现聊天记录存储为本地 JSON 文件
+- 杀进程重启后聊天记录保留
+- 修复了 syncContactsFromBridge 清空消息的竞争条件 bug
+- 修复了用户发消息后杀进程导致消息丢失的 bug
+
+### 5. 占位符替换（部分）
+- 实现 {{char}} → contact.name 的替换
+- {{user}} 暂时硬编码为"江栩栩"，待 Persona 绑定完成后改进
+
+### 6. 清理硬编码数据
+- 清空 chat_models.dart 里的 ChatSeedData，移除所有预设角色和对话
+
+### 7. 桥接服务自动启动
+- 在 launcher.sh 的 start_st() 函数里加入桥接服务启动命令
+- ST 和桥接服务现在同步启动
+
+### 8. 项目备份与版本管理
+- Fork 原仓库到 https://github.com/shukeitei/FlutterCppWangWangPhone
+- 项目迁移到 ~/Developer/FlutterCppWangWangPhone/
+- 桥接服务迁移到 ~/Developer/wangwang_bridge.py
+
+## 2026年4月6日
+
+### 9. Persona 绑定系统
+- 桥接服务新增接口：/personas（读取所有 persona）、/persona_binding（GET 查询/POST 设置绑定）、/bindings（查看所有绑定）
+- 修复 persona 数据路径：从 settings['personas'] 改为 settings['power_user']['personas']
+- Flutter controller 新增 5 个方法：fetchPersonas、setGlobalPersona、loadGlobalPersona、setChatPersona、getResolvedPersona
+- 全局身份持久化存储（shared_preferences）
+
+### 10. Persona UI
+- "我"页面新增"我的身份"卡片，点击弹出 persona 选择底部弹窗
+- 聊天页右上角新增"聊天设置"弹窗，支持单聊覆盖 persona
+- Persona 优先级：单聊绑定 > 全局默认 > 硬编码"江栩栩"
+
+### 11. sendTextMessage 接入 Persona
+- 发消息时自动调用 getResolvedPersona 解析当前聊天应该用哪个江栩栩
+- 角色卡的 {{user}} 用解析后的 persona name 替换
+- Persona description 拼入 system prompt 的【用户人设】块
+- AI 回复的 {{user}}/{{char}} 也做二次清理替换
+
+### 12. IP 常量化
+- 提取 kBridgeHost 常量到 chat_controller.dart 顶部
+- 全部硬编码 IP 替换为 $kBridgeHost 引用
+- Android 不支持 .local 主机名，只能用 IP 地址
+
+
+
+## 2026年4月6日（续）
+
+### 13. 头像系统
+- 桥接服务新增 /avatar/<文件名> 和 /persona_avatar/<persona_id> 接口
+- /characters 返回新增 filename 字段
+- 新增 _serve_image 方法，支持 png/jpg/gif/webp，带 1 小时缓存头
+- 新建 AvatarWidget 通用组件（CachedNetworkImage + fallback 颜色圆圈）
+- 联系人列表、聊天列表、聊天页顶部全部显示真实角色头像
+
+### 14. Persona UI 美化
+- Persona 选择列表加头像 + 行距 + 分隔线 + 选中高亮
+- "我"页面身份卡片重新设计（头像 + 描述预览 + 点击切换）
+
+### 15. 气泡设置按钮恢复
+- 右上角现在有两个按钮共存：聊天设置（调参图标）+ 气泡设置（右侧图标）
+
+
+## 2026年4月6日（续2）
+
+### 16. 预设系统
+- 桥接服务新增 /presets（列表）和 /presets/<名称>（详情）接口
+- 预设数据来源：OpenAI Settings/ 目录（不是 context/ 目录！）
+- 新建 chat_preset_models.dart 数据模型
+- 新建 widgets/preset_widgets.dart UI 组件
+- "我"页面加预设卡片（橙色层叠图标）
+- 聊天设置弹窗加预设选择 + 词条开关（橙色 toggle）
+- sendTextMessage 接入 assembleSystemPrompt 方法
+- 修复：单聊选预设不污染全局、词条列表溢出、展开按钮不灵敏
+
+
+## 2026年4月8日
+
+### 17. 模型选择器
+- 新增 kAvailableModels 常量（deepseek-chat / deepseek-reasoner）
+- controller 新增 currentModelId 字段、loadCurrentModel、setCurrentModel 方法
+- "我"页面新增模型选择卡片和底部弹窗
+- sendTextMessage 接入 _currentModelId 变量
+- receiveTimeout 改为 120 秒
+- max_tokens 按模型动态调整：deepseek-reasoner 用 4000，deepseek-chat 保持 500
+- 新增 debugPrint('[sendTextMessage] using model: $_currentModelId') 调试日志
+
+### 18. AI 回复内容过滤
+- 新增 _extractDisplayContent 方法
+- 提取逻辑：优先取 <content> 标签内容，没有则剥离 <thinking>/<details>/<tableEdit>/<horae> 后返回剩余
+- sendTextMessage 的 aiReplyText 改为经过过滤后的内容
+- 解决了 ST 预设 COT 词条导致思维链整块显示在聊天气泡里的问题
+
+### 19. API 接口配置化
+- 新建 chat_api_models.dart，预定义 5 家 provider（DeepSeek/OpenAI/Claude/Gemini/OpenRouter）
+- controller 删除旧的 kAvailableModels/_currentModelId 等，新增 _apiProviderId/_apiKey/_apiModelId
+- sendTextMessage 改为从 shared_preferences 读取配置，Claude API 单独分支处理
+- "我"页面的"AI模型"卡片改为"API接口"卡片，支持选 provider + 输 key + 选 model
+- 硬编码 sk-cabf key 已从源码彻底移除
+
+## 2026年4月8日（续）
+
+### 20. 消息管理系统
+- ChatMessage 新增 isHidden 字段，持久化兼容
+- 长按气泡弹出底部菜单：复制/改写/回溯/删除/隐藏(取消隐藏)/多选
+- 改写功能：气泡原地变 TextField，橙色边框，确认后更新消息
+- 回溯功能：删除指定消息及之后所有消息，带二次确认
+- 隐藏功能：气泡变半透明+闭眼图标，发 API 时跳过隐藏消息
+- 多选模式：勾选框+顶部计数栏+底部操作栏（隐藏/取消隐藏/删除）
+- 重新生成：最后一条 AI 气泡左下角 🔄 图标，点击重新调 API
+- sendTextMessage 的 AI 调用逻辑抽成 _triggerAiReply 复用
+- 新建 contact_detail_page.dart 角色详情页（头像/名字/签名/人设折叠卡片）
+- 聊天页头像可点击进入详情页
+- 详情页底部"重置对话"按钮，支持"仅清空聊天"和"清空聊天+记忆"
+
+### 21. 重新生成版本切换
+- ChatMessage 新增 alternatives 和 activeAltIndex 字段
+- 重新生成时旧版本保留，新版本追加，UI 显示 ← 1/N → 切换器
+- 发新消息时自动清理 alternatives，只保留当前选中版本
+- 修复 rerollLastReply 的列表引用脱钩 bug（_appendMessage 重建列表导致旧引用失效）
+
+
+## 2026年4月9日
+
+### 22. 聊天设置 UI 重构（BottomSheet → 侧边栏）
+- 新增 widgets/chat_sidebar.dart：右侧 endDrawer 菜单骨架
+- 新增 pages/persona_select_page.dart：独立身份选择页，CachedNetworkImage 显示头像
+- 新增 pages/preset_select_page.dart：上下两段布局（预设列表 + 词条开关）
+- chat_app_page.dart 调参按钮改为 openEndDrawer
+- 删除旧 _ChatSettingsSheet 类、_currentPersonaLabel、_personaSubtitle（约 180 行）
+- 删除 preset_widgets.dart 中 ChatPresetSection（约 290 行）
+- 侧边栏预留世界书、记忆摘要、上下文日志扩展位
+
+### 23. Persona 选择页头像
+- ClipOval + CachedNetworkImage，URL 经 Uri.encodeComponent 编码
+- 加载失败回退到姓名首字圆圈
+
+### 24. 预设覆盖 & 词条开关持久化
+- 新增 _savePresetOverrides() / loadPresetOverrides()
+- 存储文件：wangwang_preset_overrides.json（globalPreset / chatPresets / globalToggles / chatToggles）
+- 所有修改覆盖状态的方法末尾自动 save
+- 设计原则：ST 预设本体实时拉取，本地只存用户开关覆盖层
+
+## 2026年4月9日（续）
+
+### 25. 群聊系统
+- 新增 ChatGroup 数据模型（id/name/memberContactIds/createdAt）
+- ChatThread 新增 groupId 字段区分群聊/单聊
+- 聊天Tab改造：好友/群聊子标签 + 搜索栏 + 好友列表按名字排序
+- 建群页面：群名输入 + 成员多选(最多20人) + 已选头像条 + 搜索
+- GroupAvatarWidget：取前4成员头像拼2x2网格
+- 群聊会话页：角色头像+名字气泡、typing指示器、错误横幅
+- 发言模式切换：闪电按钮（flash_on随机/flash_off手动）
+- 随机接力模式：一次API返回JSON数组，AI决定1-3个角色回复
+- 手动召唤模式：用户发消息后出现召唤条，选人触发单角色回复
+- 侧边栏：persona/preset已打通，群世界书预留
+- 重置对话（仅清空/清空+记忆）+ 解散群聊
+- JSON解析容错：剥markdown、正则提取、角色名三轮模糊匹配
+- 群系统消息不喂AI（避免污染上下文）
+- 持久化：wangwang_groups.json + 消息复用 wangwang_messages.json
+
+### 新增文件清单
+- lib/app/chat/pages/create_group_page.dart
+- lib/app/chat/pages/group_chat_page.dart
+- lib/app/chat/widgets/group_avatar_widget.dart
+
+
+## 2026年4月9日（续2）
+
+### 26. 单聊改写 bug 修复
+- Bug 1：_ChatMessageBubble 在 ListView.builder 里没传 key，编辑态 State 按 index 复用导致改写串位
+- 修复：加 ValueKey(message.id) + 构造器加 super.key
+- Bug 2：editMessage 只改 body 不改 alternatives，reroll 后改写非 0 版本时实际改错字段
+- 修复：editMessage 判断 alternatives.isNotEmpty 时同步更新 alternatives[activeAltIndex] 和 body
+
+### 27. 群聊消息管理系统
+- 长按菜单：复制/改写/回溯/删除/隐藏（系统消息不响应长按）
+- 改写：页面级 state _editingMessageId + _editController（不放 bubble 局部 state，规避 Bug 1 同类问题）
+- 编辑气泡：橙色边框 TextField + 取消/确认按钮
+- reroll：新增 controller 方法 rerollGroupLastReply，复用 sendGroupMessage(summonOnly:true) 手动召唤路径
+- alt 版本切换：气泡下方 < n/m > 箭头 + 🔄 按钮，switchAltVersion 传 groupId（不是 message.contactId）
+- 多选模式：顶部 header 替换为「取消 | 已选N条」，底部操作栏（隐藏/取消隐藏/删除），新增 _GroupMultiSelectAction widget
+- 调用 controller 既有的 batchToggleHideMessages / batchDeleteMessages
+
+## 2026年4月10日
+
+### 28. 世界书系统
+- 桥接服务新增 GET /worlds（列表）、GET /worlds/<名称>（词条详情）、GET /world_bindings（ST已知绑定）
+- 新建 chat_world_models.dart（WorldBookInfo/WorldBookEntry/WorldBookDetail/WorldBindings）
+- controller 新增：fetchWorldBookList、fetchWorldBookDetail、set/resolve WorldBooks、持久化
+- 世界书选择页 world_select_page.dart（共用组件，搜索+多选+按名称排序）
+- 四个 UI 入口：角色详情页、单聊侧边栏、群聊侧边栏、"我"页面（全局+列表浏览）
+- assembleSystemPrompt 接入 worldInfoBefore/worldInfoAfter
+- 群聊随机模式 buildGroupWorldInfo 合并全员角色世界书（带30000字符软上限）
+- 持久化：wangwang_world_bindings.json
+
+### 29. 群聊历史署名
+- _buildGroupHistory 给 AI 成员消息加【角色名】前缀
+- system prompt 加说明："历史消息以【角色名】开头"
+- 解决串戏和随机模式总选同两人的问题
+
+### 30. 群聊注入用户身份与预设
+- 群手动模式复用 assembleSystemPrompt，与单聊路径数据流完全一致
+- 群随机模式新增 extractPresetInstructions，抽取非 marker 预设词条注入
+- 两个群聊路径通过 getResolvedPersona 解析用户身份
+- 修正群手动 raw reply 占位符替换漏传 userName
+
+
+## 2026年4月11日
+
+### 31. ST vs 汪汪机 payload 大盘点
+- 在 chat_controller.dart 新增 _dumpRequestPayload() 方法，把完整 API 请求写到手机文件
+- AndroidManifest.xml 加存储权限，dump 写到 /sdcard/Download/
+- 用 adb pull 拉回 dump 文件，Python 脚本逐项对比 ST 和汪汪机的 messages 结构
+- 发现 6 项关键差异（采样参数缺失、高级定义缺失、prefill 位置错误、chatHistory 分水岭等）
+
+### 32. 采样参数接入 + UI 面板
+- controller 新增 7 个参数字段：temperature/topP/presencePenalty/frequencyPenalty/maxTokens/historyCount/streamEnabled
+- SharedPreferences 持久化，loadApiConfig 统一加载
+- _triggerAiReply 和 _callGroupChatApi 两个路径注入所有采样参数
+- 历史消息截取从硬编码 100 改为 _historyCount
+- max_tokens 从硬编码改为 _maxTokens
+- chat_app_page.dart 新增 _AiParamsCard + _AiParamsSheet（滑块调参 + 重置默认）
+- 位置：微信"我"页面，API 接口卡片下方
+- 默认值对齐 ST：temperature=1.21, top_p=0.96, presence_penalty=0.22, frequency_penalty=0.56
+
+### 33. 角色卡高级定义接入
+- 桥接 extract_character() 新增 iTXt chunk 支持
+- load_all_characters() 改为 data.* 优先（v2/v3 卡），顶层 fallback（v1 卡）
+- 桥接新增返回字段：mes_example, system_prompt, post_history_instructions, depth_prompt, alternate_greetings
+- assembleSystemPrompt 返回类型从 String 改为 Record（含 system/assistantPrefill/postHistory/depthPrompt*）
+- 新增 dialogueExamples marker 映射到 mesExample
+- charSystemPrompt 非空时插入 parts 开头
+- depth_prompt 按 depth 值插入 messages 倒数第 N 条
+- post_history_instructions 追加到 messages 末尾
+- 单聊 + 群手动路径同步改造
+
+### 34. 角色详情页高级设定面板
+- character_detail_page.dart 新增 _AdvancedSettingsCard（StatefulWidget）
+- 位置：世界书绑定下方，重置对话按钮上方
+- 点击展开从桥接拉取完整角色卡数据（首次展开时懒加载）
+- 显示 5 个字段：personality / mes_example / system_prompt / post_history_instructions / depth_prompt
+- 每个字段可折叠，紫色字符数 badge，空字段显示"未设置"
+- depth_prompt 额外显示 depth 和 role 元信息
+- 收起时显示摘要（如"性格设定 827字 · 对话示例 1244字 · 深度提示词 991字"）
+
+### 35. Assistant Prefill 提取
+- assembleSystemPrompt 遍历预设词条时，role='assistant' 的词条不再混入 system prompt
+- 单独收集为 assistantPrefill，通过返回值带出
+- 在 messages 数组末尾追加为独立 assistant 消息，带 prefix: true
+- deepseek-reasoner 不支持 prefix，自动跳过（`!_apiModelId.contains('reasoner')`）
+- 群聊路径同步处理
+
+### 36. 消息格式合规化
+- 新增 _mergeConsecutiveRoles 静态方法
+- 第一轮：非首条 system 消息转为 user
+- 第二轮：连续同 role 消息合并为一条
+- 单聊 + 群手动 + 群随机三个路径都调用
+- 单聊工作正常；群聊第二次触发仍有边界情况（待群聊专项修复）

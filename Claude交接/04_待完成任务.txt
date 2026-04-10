@@ -1,0 +1,91 @@
+# 待完成任务
+
+### 群聊消息格式专项治理（最高优先级）
+- 核心矛盾：群聊多角色回复天然产生连续 assistant 消息，DeepSeek API 要求严格 user/assistant 交替
+- 当前 _mergeConsecutiveRoles 只是简单合并，第二次触发仍会 400
+- 需要从 _buildGroupHistory 源头重新设计：可能需要把多角色回复合并为一条 assistant（带角色名前缀）
+- 或者在 API 调用前做更智能的消息重组
+- depth_prompt（原 role=system）转 user 后也会产生连续 user 问题
+
+### chatHistory 分水岭（高优先级）
+- ST 的预设有 chatHistory marker 作为分界线
+- chatHistory 之前的内容 → system message
+- chatHistory 之后的内容 → user message（附加在用户最新输入后面）
+- 汪汪机目前把所有预设内容都塞进 system message
+- 需要在 assembleSystemPrompt 中识别 chatHistory marker 位置，分割输出
+
+### prefill 对 deepseek-reasoner 的支持（中优先级）
+- 当前 reasoner 跳过 prefill（API 返回 400）
+- ST 能用 prefix:true 是因为 ST 服务端可能有特殊处理
+- 需要研究 DeepSeek reasoner API 的 prefix 机制，或找替代方案
+
+### ~~ST 角色卡高级定义接入~~（已完成 ✅）
+
+### 引用功能（群聊+单聊）
+- 长按气泡新增"引用"选项
+- 选中后输入框上方显示引用预览条
+- 发送时引用内容作为上下文传给AI
+
+### 提示词模块化
+- 把硬编码 prompt 抽到本地 JSON 文件
+- App 内新增提示词编辑页面
+- 按场景分模块：单聊/群聊随机/群聊手动/摘要生成等
+
+
+## 🟠 高优先级
+
+### 世界书读取
+- 目标：角色卡挂载的世界书内容拼进 system prompt
+- 数据来源：
+  - 角色卡 PNG → character_book 字段（内嵌世界书）
+  - data/default-user/worlds/ 目录（外部世界书）
+- 第一步：跑命令确认 character_book 字段结构
+- assembleSystemPrompt 里的 worldInfoBefore / worldInfoAfter marker 已预留
+
+### 上下文调试页打通
+- 目标：上下文调试页显示实时数据，而非死代码
+- 范围：改成精简 prompt 预览器，不再显示全部词条内容
+- 显示：预设名 + persona 名 + prompt 总字符数 + 前200字预览
+
+## 🟡 中优先级
+
+### App 内对话摘要生成
+- 调 DeepSeek 总结近期聊天，存入 ChatSummaryEntry
+- 手动触发优先（"生成摘要"按钮），后续可做自动触发
+
+### 消息发送队列 + 延迟回复机制
+- 消息进调度队列，根据角色状态/时间段计算延迟
+- 角色忙碌/睡觉/冷战 → 延迟数小时回复
+- 中间显示"对方正在忙"或无提示（模拟已读不回）
+
+### API 层消息合并预处理
+- 连续同角色消息拼接后再发 API，解决连发 error
+- 显示层保持多条气泡，API 层合并为一条
+
+### 时光记忆共享（酒馆 → App 方向）
+- 目标：汪汪机读取 ST 的时光记忆插件数据
+- 数据位置已确认：见 09_horae-data-architecture.md
+- 实现方案：桥接服务加 /horae/<群组名> 接口，定期轮询读取 JSONL
+
+### 角色卡缓存
+- 目标：避免每次启动重读全部 PNG 文件
+- 方案：记录 PNG 修改时间，无变化直接用缓存
+
+### 朋友圈 AI 自动发动态
+- 目标：打开朋友圈时 AI 自动生成角色新动态
+
+## 🟢 低优先级
+
+### phoneMemory 记忆桥接（App → 酒馆方向）
+- 方案已确认，见 06-phoneMemory-bridge-plan.md
+- 实施流程：App 摘要生成 → 写入 pending_sync.json → Horae 端合并注入 prompt
+- 等基础功能 + App 摘要功能就绪后实施
+
+### 离线草稿箱
+- 无网时缓存消息，显示为"小云朵☁️"待发状态
+- 回到局域网后自动发送，角色回复顺滑弹出
+
+### 远程访问（Tailscale / Cloudflare Tunnel）
+- 脱离同一 WiFi 限制，外出也能实时聊天
+
+### Pixel UI 风格改造

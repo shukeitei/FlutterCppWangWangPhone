@@ -2116,6 +2116,381 @@ class _ApiConfigCard extends StatelessWidget {
   }
 }
 
+class _AiParamsCard extends StatelessWidget {
+  const _AiParamsCard({required this.controller});
+
+  final ChatAppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final subtitle = 'T=${controller.temperature.toStringAsFixed(2)}'
+            '  TopP=${controller.topP.toStringAsFixed(2)}'
+            '  Tokens=${controller.maxTokens}';
+
+        return FrostPanel(
+          padding: EdgeInsets.zero,
+          borderRadius: 24,
+          child: InkWell(
+            onTap: () => _showParamsSheet(context),
+            borderRadius: BorderRadius.circular(24),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8913A).withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(
+                      Icons.tune_rounded,
+                      color: Color(0xFFE8913A),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'AI 参数调节',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: palette.primaryText,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: palette.secondaryText,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: palette.secondaryText,
+                    size: 24,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showParamsSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _AiParamsSheet(controller: controller),
+    );
+  }
+}
+
+class _AiParamsSheet extends StatefulWidget {
+  const _AiParamsSheet({required this.controller});
+
+  final ChatAppController controller;
+
+  @override
+  State<_AiParamsSheet> createState() => _AiParamsSheetState();
+}
+
+class _AiParamsSheetState extends State<_AiParamsSheet> {
+  late double _temperature;
+  late double _topP;
+  late double _presencePenalty;
+  late double _frequencyPenalty;
+  late double _maxTokens;
+  late double _historyCount;
+  late bool _stream;
+
+  @override
+  void initState() {
+    super.initState();
+    _temperature = widget.controller.temperature;
+    _topP = widget.controller.topP;
+    _presencePenalty = widget.controller.presencePenalty;
+    _frequencyPenalty = widget.controller.frequencyPenalty;
+    _maxTokens = widget.controller.maxTokens.toDouble();
+    _historyCount = widget.controller.historyCount.toDouble();
+    _stream = widget.controller.streamEnabled;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
+      ),
+      decoration: BoxDecoration(
+        color: palette.pageBackground,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 顶部把手
+          Padding(
+            padding: const EdgeInsets.only(top: 12, bottom: 8),
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: palette.secondaryText.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          // 标题行
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.tune_rounded, color: Color(0xFFE8913A), size: 22),
+                const SizedBox(width: 8),
+                Text(
+                  'AI 参数调节',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: palette.primaryText,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: _resetDefaults,
+                  child: const Text('重置默认'),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          // 参数列表
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              children: [
+                _buildSliderTile(
+                  label: 'Temperature',
+                  hint: '创造力 / 随机性',
+                  value: _temperature,
+                  min: 0.0,
+                  max: 2.0,
+                  divisions: 200,
+                  displayValue: _temperature.toStringAsFixed(2),
+                  onChanged: (v) => setState(() => _temperature = v),
+                  onChangeEnd: (v) => widget.controller.setTemperature(v),
+                ),
+                _buildSliderTile(
+                  label: 'Top P',
+                  hint: '核采样',
+                  value: _topP,
+                  min: 0.0,
+                  max: 1.0,
+                  divisions: 100,
+                  displayValue: _topP.toStringAsFixed(2),
+                  onChanged: (v) => setState(() => _topP = v),
+                  onChangeEnd: (v) => widget.controller.setTopP(v),
+                ),
+                _buildSliderTile(
+                  label: 'Presence Penalty',
+                  hint: '话题新鲜度',
+                  value: _presencePenalty,
+                  min: -2.0,
+                  max: 2.0,
+                  divisions: 400,
+                  displayValue: _presencePenalty.toStringAsFixed(2),
+                  onChanged: (v) => setState(() => _presencePenalty = v),
+                  onChangeEnd: (v) => widget.controller.setPresencePenalty(v),
+                ),
+                _buildSliderTile(
+                  label: 'Frequency Penalty',
+                  hint: '重复惩罚',
+                  value: _frequencyPenalty,
+                  min: -2.0,
+                  max: 2.0,
+                  divisions: 400,
+                  displayValue: _frequencyPenalty.toStringAsFixed(2),
+                  onChanged: (v) => setState(() => _frequencyPenalty = v),
+                  onChangeEnd: (v) => widget.controller.setFrequencyPenalty(v),
+                ),
+                const Divider(height: 24),
+                _buildSliderTile(
+                  label: 'Max Tokens',
+                  hint: 'AI 回复最大令牌数',
+                  value: _maxTokens,
+                  min: 256,
+                  max: 16384,
+                  divisions: 63,
+                  displayValue: _maxTokens.toInt().toString(),
+                  onChanged: (v) => setState(() => _maxTokens = v),
+                  onChangeEnd: (v) => widget.controller.setMaxTokens(v.toInt()),
+                ),
+                _buildSliderTile(
+                  label: 'History Count',
+                  hint: '发送给 AI 的历史消息数',
+                  value: _historyCount,
+                  min: 10,
+                  max: 500,
+                  divisions: 49,
+                  displayValue: _historyCount.toInt().toString(),
+                  onChanged: (v) => setState(() => _historyCount = v),
+                  onChangeEnd: (v) => widget.controller.setHistoryCount(v.toInt()),
+                ),
+                const Divider(height: 24),
+                // Stream 开关
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Stream',
+                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                color: palette.primaryText,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '流式传输（逐字输出）',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: palette.secondaryText,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch.adaptive(
+                        value: _stream,
+                        activeTrackColor: const Color(0xFFE8913A),
+                        onChanged: (v) {
+                          setState(() => _stream = v);
+                          widget.controller.setStreamEnabled(v);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSliderTile({
+    required String label,
+    required String hint,
+    required double value,
+    required double min,
+    required double max,
+    required int divisions,
+    required String displayValue,
+    required ValueChanged<double> onChanged,
+    required ValueChanged<double> onChangeEnd,
+  }) {
+    final palette = ChatPalette.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                label,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: palette.primaryText,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                hint,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: palette.secondaryText,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8913A).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  displayValue,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFFE8913A),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: const Color(0xFFE8913A),
+              inactiveTrackColor: const Color(0xFFE8913A).withValues(alpha: 0.15),
+              thumbColor: const Color(0xFFE8913A),
+              overlayColor: const Color(0xFFE8913A).withValues(alpha: 0.12),
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+            ),
+            child: Slider(
+              value: value,
+              min: min,
+              max: max,
+              divisions: divisions,
+              onChanged: onChanged,
+              onChangeEnd: onChangeEnd,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _resetDefaults() {
+    widget.controller.resetAiParams();
+    setState(() {
+      _temperature = 1.21;
+      _topP = 0.96;
+      _presencePenalty = 0.22;
+      _frequencyPenalty = 0.56;
+      _maxTokens = 4000;
+      _historyCount = 100;
+      _stream = false;
+    });
+  }
+}
+
 class _GlobalWorldBookCard extends StatelessWidget {
   const _GlobalWorldBookCard({required this.controller});
 
@@ -2903,6 +3278,7 @@ class _ProfileTab extends StatelessWidget {
         _ProfilePersonaCard(controller: controller),
         PresetCard(controller: controller),
         _ApiConfigCard(controller: controller),
+        _AiParamsCard(controller: controller),
         _GlobalWorldBookCard(controller: controller),
         _WorldBookListCard(controller: controller),
         const SizedBox(height: 18),

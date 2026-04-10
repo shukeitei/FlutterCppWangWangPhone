@@ -17,6 +17,38 @@ import 'chat_world_models.dart';
 
 const String kBridgeHost = 'http://192.168.1.217:7700';
 
+/// 临时调试：把 AI 请求 payload dump 到手机文件，方便对比 ST
+Future<void> _dumpRequestPayload(Map<String, dynamic> requestData, {String tag = 'single'}) async {
+  try {
+    // 优先写到 /sdcard/Download（adb pull 可直接拉）
+    // 如果失败则 fallback 到 app 内部目录
+    final encoder = const JsonEncoder.withIndent('  ');
+    final content = encoder.convert(requestData);
+
+    File? file;
+    try {
+      final extDir = Directory('/storage/emulated/0/Download');
+      if (await extDir.exists()) {
+        file = File('${extDir.path}/wangwang_dump_$tag.json');
+        await file.writeAsString(content);
+      }
+    } catch (_) {
+      file = null;
+    }
+
+    // fallback: app 内部目录
+    if (file == null) {
+      final dir = await getApplicationDocumentsDirectory();
+      file = File('${dir.path}/wangwang_dump_$tag.json');
+      await file.writeAsString(content);
+    }
+
+    debugPrint('[DUMP] payload written to ${file.path}');
+  } catch (e) {
+    debugPrint('[DUMP] failed to write: $e');
+  }
+}
+
 class ChatAppController extends ChangeNotifier {
   ChatAppController.seeded({ChatSummaryStore? summaryStore})
     : _contacts = List<ChatContact>.from(ChatSeedData.contacts),
@@ -376,6 +408,9 @@ class ChatAppController extends ChangeNotifier {
       requestData = {
         'model': _apiModelId,
         'max_tokens': maxTokens,
+        'temperature': _temperature,
+        'top_p': _topP,
+        'stream': _streamEnabled,
         'system': systemPrompt,
         'messages': historyMessages,
       };
@@ -391,9 +426,16 @@ class ChatAppController extends ChangeNotifier {
           ...historyMessages,
         ],
         'max_tokens': maxTokens,
-        'stream': false,
+        'temperature': _temperature,
+        'top_p': _topP,
+        'presence_penalty': _presencePenalty,
+        'frequency_penalty': _frequencyPenalty,
+        'stream': _streamEnabled,
       };
     }
+
+    // 临时调试：dump 完整 payload
+    await _dumpRequestPayload(requestData, tag: 'group');
 
     final response = await dio.post(
       provider.baseUrl,
@@ -521,6 +563,9 @@ ${memberProfiles.join('\n\n')}
         .replaceAll('{{User}}', userName);
 
     final history = _buildGroupHistory(groupId);
+    // 合规化：合并连续同 role 的消息（群聊中多角色回复会产生连续 assistant）
+    _mergeConsecutiveRoles(history);
+
     _dumpGroupRequest(
       tag: 'group-random',
       groupId: groupId,
@@ -674,6 +719,12 @@ ${memberProfiles.join('\n\n')}
     String charDesc = '';
     String charPersonality = '';
     String charScenario = '';
+    String charMesExample = '';
+    String charSysPrompt = '';
+    String charPostHistory = '';
+    String charDpText = '';
+    int charDpDepth = 4;
+    String charDpRole = 'system';
     try {
       final charRes = await dio.get(
         '$kBridgeHost/characters/${Uri.encodeComponent(contact.name)}',
@@ -682,6 +733,13 @@ ${memberProfiles.join('\n\n')}
       charDesc = (d['description'] as String?) ?? '';
       charPersonality = (d['personality'] as String?) ?? '';
       charScenario = (d['scenario'] as String?) ?? '';
+      charMesExample = (d['mes_example'] as String?) ?? '';
+      charSysPrompt = (d['system_prompt'] as String?) ?? '';
+      charPostHistory = (d['post_history_instructions'] as String?) ?? '';
+      final dpMap = d['depth_prompt'] as Map<String, dynamic>? ?? {};
+      charDpText = (dpMap['prompt'] as String?) ?? '';
+      charDpDepth = (dpMap['depth'] as int?) ?? 4;
+      charDpRole = (dpMap['role'] as String?) ?? 'system';
     } catch (_) {}
 
     // 注入世界书：APP全局 + 群聊 + 被召唤角色的角色专属
@@ -691,31 +749,22 @@ ${memberProfiles.join('\n\n')}
     );
 
     // E2a: 复用单聊预设拼装路径，让群手动模式吃到完整预设
-    String systemPrompt;
-    if (_currentPresetDetail != null) {
-      systemPrompt = assembleSystemPrompt(
-        contactId: targetContactId,
-        charDescription: charDesc,
-        charPersonality: charPersonality,
-        charScenario: charScenario,
-        personaDescription: personaDesc,
-        worldInfoBefore: worldInfo.before,
-        worldInfoAfter: worldInfo.after,
-      );
-    } else {
-      // 没有预设：兜底用旧式拼接
-      final personaText = [
-        if (charDesc.isNotEmpty) charDesc,
-        if (charPersonality.isNotEmpty) '性格：$charPersonality',
-        if (charScenario.isNotEmpty) '场景：$charScenario',
-      ].join('\n');
-      systemPrompt = [
-        if (worldInfo.before.isNotEmpty) worldInfo.before,
-        if (personaText.isNotEmpty) personaText,
-        if (personaDesc.isNotEmpty) '【用户人设】\n$personaDesc',
-        if (worldInfo.after.isNotEmpty) worldInfo.after,
-      ].join('\n\n');
-    }
+    final assembled = assembleSystemPrompt(
+      contactId: targetContactId,
+      charDescription: charDesc,
+      charPersonality: charPersonality,
+      charScenario: charScenario,
+      personaDescription: personaDesc,
+      worldInfoBefore: worldInfo.before,
+      worldInfoAfter: worldInfo.after,
+      mesExample: charMesExample,
+      charSystemPrompt: charSysPrompt,
+      postHistoryInstructions: charPostHistory,
+      depthPromptText: charDpText,
+      depthPromptDepth: charDpDepth,
+      depthPromptRole: charDpRole,
+    );
+    String systemPrompt = assembled.system;
 
     // 群语境补充（追加在预设 system 之后，不破坏预设结构）
     const historyFormatNote =
@@ -728,6 +777,33 @@ ${memberProfiles.join('\n\n')}
     systemPrompt = _replacePlaceholders(systemPrompt, contact.name, userName);
 
     final history = _buildGroupHistory(groupId);
+
+    // 插入 depth_prompt（按深度插入 history 倒数第 N 条之前）
+    final dpText = assembled.depthPromptText.isNotEmpty
+        ? _replacePlaceholders(assembled.depthPromptText, contact.name, userName)
+        : '';
+    if (dpText.isNotEmpty && history.isNotEmpty) {
+      final insertIdx = (history.length - assembled.depthPromptDepth).clamp(0, history.length);
+      history.insert(insertIdx, {'role': assembled.depthPromptRole, 'content': dpText});
+    }
+    // 插入 post_history_instructions（末尾）
+    final phText = assembled.postHistory.isNotEmpty
+        ? _replacePlaceholders(assembled.postHistory, contact.name, userName)
+        : '';
+    if (phText.isNotEmpty) {
+      history.add({'role': 'system', 'content': phText});
+    }
+    // assistant prefill（最后一条）
+    final prefillText = assembled.assistantPrefill.isNotEmpty
+        ? _replacePlaceholders(assembled.assistantPrefill, contact.name, userName)
+        : '';
+    if (prefillText.isNotEmpty && !_apiModelId.contains('reasoner')) {
+      history.add({'role': 'assistant', 'content': prefillText, 'prefix': true});
+    }
+
+    // 合规化：合并连续同 role 的消息（群聊中多角色回复会产生连续 assistant）
+    _mergeConsecutiveRoles(history);
+
     _dumpGroupRequest(
       tag: 'group-manual',
       groupId: groupId,
@@ -739,7 +815,7 @@ ${memberProfiles.join('\n\n')}
       dio: dio,
       systemPrompt: systemPrompt,
       historyMessages: history,
-      maxTokens: 800,
+      maxTokens: _maxTokens,
     );
     final cleaned = _replacePlaceholders(rawReply, contact.name, userName).trim();
 
@@ -845,6 +921,15 @@ ${memberProfiles.join('\n\n')}
   String _apiKey = '';
   String _apiModelId = '';
 
+  // AI 采样参数（默认值参考 ST 配置）
+  double _temperature = 1.21;
+  double _topP = 0.96;
+  double _presencePenalty = 0.22;
+  double _frequencyPenalty = 0.56;
+  int _maxTokens = 4000;
+  int _historyCount = 100;
+  bool _streamEnabled = false;
+
   String get apiProviderId => _apiProviderId;
   String get apiKey => _apiKey;
   String get apiModelId => _apiModelId;
@@ -852,11 +937,26 @@ ${memberProfiles.join('\n\n')}
   bool get isApiConfigured =>
       _apiKey.isNotEmpty && _apiProviderId.isNotEmpty && _apiModelId.isNotEmpty;
 
+  double get temperature => _temperature;
+  double get topP => _topP;
+  double get presencePenalty => _presencePenalty;
+  double get frequencyPenalty => _frequencyPenalty;
+  int get maxTokens => _maxTokens;
+  int get historyCount => _historyCount;
+  bool get streamEnabled => _streamEnabled;
+
   Future<void> loadApiConfig() async {
     final prefs = await SharedPreferences.getInstance();
     _apiProviderId = prefs.getString('api_provider_id') ?? '';
     _apiKey = prefs.getString('api_key') ?? '';
     _apiModelId = prefs.getString('api_model_id') ?? '';
+    _temperature = prefs.getDouble('ai_temperature') ?? 1.21;
+    _topP = prefs.getDouble('ai_top_p') ?? 0.96;
+    _presencePenalty = prefs.getDouble('ai_presence_penalty') ?? 0.22;
+    _frequencyPenalty = prefs.getDouble('ai_frequency_penalty') ?? 0.56;
+    _maxTokens = prefs.getInt('ai_max_tokens') ?? 4000;
+    _historyCount = prefs.getInt('ai_history_count') ?? 100;
+    _streamEnabled = prefs.getBool('ai_stream') ?? false;
     notifyListeners();
   }
 
@@ -880,6 +980,74 @@ ${memberProfiles.join('\n\n')}
     _apiModelId = modelId.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('api_model_id', modelId.trim());
+    notifyListeners();
+  }
+
+  Future<void> setTemperature(double v) async {
+    _temperature = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('ai_temperature', v);
+    notifyListeners();
+  }
+
+  Future<void> setTopP(double v) async {
+    _topP = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('ai_top_p', v);
+    notifyListeners();
+  }
+
+  Future<void> setPresencePenalty(double v) async {
+    _presencePenalty = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('ai_presence_penalty', v);
+    notifyListeners();
+  }
+
+  Future<void> setFrequencyPenalty(double v) async {
+    _frequencyPenalty = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('ai_frequency_penalty', v);
+    notifyListeners();
+  }
+
+  Future<void> setMaxTokens(int v) async {
+    _maxTokens = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('ai_max_tokens', v);
+    notifyListeners();
+  }
+
+  Future<void> setHistoryCount(int v) async {
+    _historyCount = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('ai_history_count', v);
+    notifyListeners();
+  }
+
+  Future<void> setStreamEnabled(bool v) async {
+    _streamEnabled = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('ai_stream', v);
+    notifyListeners();
+  }
+
+  Future<void> resetAiParams() async {
+    _temperature = 1.21;
+    _topP = 0.96;
+    _presencePenalty = 0.22;
+    _frequencyPenalty = 0.56;
+    _maxTokens = 4000;
+    _historyCount = 100;
+    _streamEnabled = false;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('ai_temperature');
+    await prefs.remove('ai_top_p');
+    await prefs.remove('ai_presence_penalty');
+    await prefs.remove('ai_frequency_penalty');
+    await prefs.remove('ai_max_tokens');
+    await prefs.remove('ai_history_count');
+    await prefs.remove('ai_stream');
     notifyListeners();
   }
 
@@ -1428,6 +1596,27 @@ Future<void> syncContactsFromBridge() async {
   }
 
   /// 把超长字符串拆成 800 字符一段，避免 Android logcat 截断
+  /// 合并 messages 数组中连续同 role 的消息（DeepSeek 等 API 要求严格交替）。
+  /// 1. 非首条 system 转为 user（API 只接受首条为 system）
+  /// 2. 连续同 role 的消息合并为一条
+  /// 需要多轮扫描直到稳定。
+  static void _mergeConsecutiveRoles(List<Map<String, dynamic>> messages) {
+    // 第一轮：非首条 system 转为 user
+    for (var i = 1; i < messages.length; i++) {
+      if (messages[i]['role'] == 'system') {
+        messages[i]['role'] = 'user';
+      }
+    }
+    // 第二轮：合并连续同 role（倒序遍历，避免索引错乱）
+    for (var i = messages.length - 1; i > 0; i--) {
+      if (messages[i]['role'] == messages[i - 1]['role']) {
+        messages[i - 1]['content'] =
+            '${messages[i - 1]['content']}\n\n${messages[i]['content']}';
+        messages.removeAt(i);
+      }
+    }
+  }
+
   static List<String> _splitForLog(String s) {
     const chunk = 800;
     if (s.length <= chunk) return [s];
@@ -1523,7 +1712,18 @@ Future<void> syncContactsFromBridge() async {
 
   /// 核心方法：按预设拼装 system prompt
   /// 返回拼好的完整 prompt 文本
-  String assembleSystemPrompt({
+  /// 返回值：system = 拼好的 system prompt；
+  /// assistantPrefill = 预设中 role='assistant' 的词条，需作为独立 assistant 消息追加到 messages 末尾；
+  /// postHistory = 角色卡 post_history_instructions（需插入 messages 末尾）；
+  /// depthPromptText/depthPromptDepth/depthPromptRole = 需按深度插入 messages 的内容。
+  ({
+    String system,
+    String assistantPrefill,
+    String postHistory,
+    String depthPromptText,
+    int depthPromptDepth,
+    String depthPromptRole,
+  }) assembleSystemPrompt({
     required String contactId,
     required String charDescription,
     required String charPersonality,
@@ -1531,21 +1731,43 @@ Future<void> syncContactsFromBridge() async {
     required String personaDescription,
     String worldInfoBefore = '',
     String worldInfoAfter = '',
+    String mesExample = '',
+    String charSystemPrompt = '',
+    String postHistoryInstructions = '',
+    String depthPromptText = '',
+    int depthPromptDepth = 4,
+    String depthPromptRole = 'system',
   }) {
     final detail = _currentPresetDetail;
     if (detail == null) {
       // 没有预设就用旧逻辑
-      return [
+      final sys = [
+        if (charSystemPrompt.isNotEmpty) charSystemPrompt,
         if (worldInfoBefore.isNotEmpty) worldInfoBefore,
         if (charDescription.isNotEmpty) charDescription,
         if (charPersonality.isNotEmpty) '性格：$charPersonality',
         if (charScenario.isNotEmpty) '场景：$charScenario',
+        if (mesExample.isNotEmpty) '对话示例：\n$mesExample',
         if (personaDescription.isNotEmpty) '【用户人设】\n$personaDescription',
         if (worldInfoAfter.isNotEmpty) worldInfoAfter,
       ].join('\n\n');
+      return (
+        system: sys,
+        assistantPrefill: '',
+        postHistory: postHistoryInstructions,
+        depthPromptText: depthPromptText,
+        depthPromptDepth: depthPromptDepth,
+        depthPromptRole: depthPromptRole,
+      );
     }
 
     final parts = <String>[];
+    final assistantParts = <String>[];
+
+    // 角色卡自带 system_prompt 放在最前
+    if (charSystemPrompt.isNotEmpty) {
+      parts.add(charSystemPrompt);
+    }
 
     for (final orderItem in detail.promptOrder) {
       final enabled = resolvePromptEnabled(contactId, orderItem.identifier);
@@ -1568,18 +1790,32 @@ Future<void> syncContactsFromBridge() async {
             if (worldInfoBefore.isNotEmpty) parts.add(worldInfoBefore);
           case 'worldInfoAfter':
             if (worldInfoAfter.isNotEmpty) parts.add(worldInfoAfter);
-          // chatHistory, dialogueExamples → 不拼进 system prompt
+          case 'dialogueExamples':
+            if (mesExample.isNotEmpty) parts.add(mesExample);
+          // chatHistory → 不拼进 system prompt
         }
         continue;
       }
 
-      // 普通词条 → 有 content 就拼进去
+      // 普通词条 → 按 role 分流
       if (prompt != null && prompt.content.isNotEmpty) {
-        parts.add(prompt.content);
+        if (prompt.role == 'assistant') {
+          // assistant 角色的词条 → 作为 prefill 独立提取
+          assistantParts.add(prompt.content);
+        } else {
+          parts.add(prompt.content);
+        }
       }
     }
 
-    return parts.join('\n\n');
+    return (
+      system: parts.join('\n\n'),
+      assistantPrefill: assistantParts.join('\n'),
+      postHistory: postHistoryInstructions,
+      depthPromptText: depthPromptText,
+      depthPromptDepth: depthPromptDepth,
+      depthPromptRole: depthPromptRole,
+    );
   }
 
   /// 群聊随机模式专用：从当前预设里抽取所有 enabled 的非 marker 指令块。
@@ -2145,6 +2381,12 @@ Future<void> syncContactsFromBridge() async {
       String systemPrompt = '你是一个AI角色，请自然地回复用户。';
       String userName = '江栩栩';
       String personaDesc = '';
+      // 高级定义（depth_prompt / post_history_instructions / assistant prefill）
+      String _postHistory = '';
+      String _depthText = '';
+      int _depthDepth = 4;
+      String _depthRole = 'system';
+      String _assistantPrefill = '';
       try {
         final resolved = await getResolvedPersona(contact.name);
         final pName = resolved['name'] as String? ?? '';
@@ -2160,34 +2402,48 @@ Future<void> syncContactsFromBridge() async {
         final desc = charData['description'] as String? ?? '';
         final personality = charData['personality'] as String? ?? '';
         final scenario = charData['scenario'] as String? ?? '';
+        final mesExample = charData['mes_example'] as String? ?? '';
+        final charSysPrompt = charData['system_prompt'] as String? ?? '';
+        final postHistoryInst = charData['post_history_instructions'] as String? ?? '';
+        final depthPromptMap = charData['depth_prompt'] as Map<String, dynamic>? ?? {};
+        final dpText = depthPromptMap['prompt'] as String? ?? '';
+        final dpDepth = depthPromptMap['depth'] as int? ?? 4;
+        final dpRole = depthPromptMap['role'] as String? ?? 'system';
 
         // 拉取世界书内容
         final worldInfo = await buildWorldInfoStrings(contactId: contactId);
 
-        // 如果有预设，用预设拼装；否则走旧逻辑
-        if (_currentPresetDetail != null) {
-          systemPrompt = assembleSystemPrompt(
-            contactId: contactId,
-            charDescription: desc,
-            charPersonality: personality,
-            charScenario: scenario,
-            personaDescription: personaDesc,
-            worldInfoBefore: worldInfo.before,
-            worldInfoAfter: worldInfo.after,
-          );
-        } else {
-          systemPrompt = [
-            if (worldInfo.before.isNotEmpty) worldInfo.before,
-            if (desc.isNotEmpty) desc,
-            if (personality.isNotEmpty) '性格：$personality',
-            if (scenario.isNotEmpty) '场景：$scenario',
-            if (personaDesc.isNotEmpty) '【用户人设】\n$personaDesc',
-            if (worldInfo.after.isNotEmpty) worldInfo.after,
-          ].join('\n\n');
-        }
+        // 用统一的 assembleSystemPrompt 拼装（无预设时内部走旧逻辑）
+        final assembled = assembleSystemPrompt(
+          contactId: contactId,
+          charDescription: desc,
+          charPersonality: personality,
+          charScenario: scenario,
+          personaDescription: personaDesc,
+          worldInfoBefore: worldInfo.before,
+          worldInfoAfter: worldInfo.after,
+          mesExample: mesExample,
+          charSystemPrompt: charSysPrompt,
+          postHistoryInstructions: postHistoryInst,
+          depthPromptText: dpText,
+          depthPromptDepth: dpDepth,
+          depthPromptRole: dpRole,
+        );
+        systemPrompt = assembled.system;
 
         // 统一做占位符替换
         systemPrompt = _replacePlaceholders(systemPrompt, contact.name, userName);
+        _postHistory = assembled.postHistory.isNotEmpty
+            ? _replacePlaceholders(assembled.postHistory, contact.name, userName)
+            : '';
+        _depthText = assembled.depthPromptText.isNotEmpty
+            ? _replacePlaceholders(assembled.depthPromptText, contact.name, userName)
+            : '';
+        _depthDepth = assembled.depthPromptDepth;
+        _depthRole = assembled.depthPromptRole;
+        _assistantPrefill = assembled.assistantPrefill.isNotEmpty
+            ? _replacePlaceholders(assembled.assistantPrefill, contact.name, userName)
+            : '';
       } catch (_) {
         // 拉不到角色卡就用默认 prompt，不影响聊天
       }
@@ -2196,8 +2452,8 @@ Future<void> syncContactsFromBridge() async {
       final history = messagesFor(contactId)
           .where((m) => m.body is WordMessageBody && !m.isHidden)
           .toList();
-      final recentHistory = history.length > 100
-          ? history.sublist(history.length - 100)
+      final recentHistory = history.length > _historyCount
+          ? history.sublist(history.length - _historyCount)
           : history;
 
       final messages = <Map<String, dynamic>>[
@@ -2208,6 +2464,31 @@ Future<void> syncContactsFromBridge() async {
             'content': (m.body as WordMessageBody).text,
           },
       ];
+
+      // 插入 depth_prompt（按深度插入 messages 倒数第 N 条之前）
+      if (_depthText.isNotEmpty && messages.length > 1) {
+        final insertIdx = (messages.length - _depthDepth).clamp(1, messages.length);
+        messages.insert(insertIdx, {'role': _depthRole, 'content': _depthText});
+      }
+
+      // 插入 post_history_instructions（放在 messages 末尾）
+      if (_postHistory.isNotEmpty) {
+        messages.add({'role': 'system', 'content': _postHistory});
+      }
+
+      // 插入 assistant prefill（最后一条，引导 AI 回复格式）
+      // prefix: true 告诉 API 这不是完整回复，模型应从此处续写
+      // 注意：deepseek-reasoner 不支持 prefix，跳过；其他模型正常发
+      if (_assistantPrefill.isNotEmpty && !_apiModelId.contains('reasoner')) {
+        messages.add({
+          'role': 'assistant',
+          'content': _assistantPrefill,
+          'prefix': true,
+        });
+      }
+
+      // 合规化：合并连续同 role 的消息（DeepSeek 等 API 要求严格交替）
+      _mergeConsecutiveRoles(messages);
 
       // 第三步：根据当前 provider 发请求
       debugPrint('[_triggerAiReply] provider=$_apiProviderId model=$_apiModelId');
@@ -2242,7 +2523,10 @@ Future<void> syncContactsFromBridge() async {
         };
         requestData = {
           'model': _apiModelId,
-          'max_tokens': 1024,
+          'max_tokens': _maxTokens,
+          'temperature': _temperature,
+          'top_p': _topP,
+          'stream': _streamEnabled,
           'system': systemPrompt,
           'messages': [
             for (final m in recentHistory)
@@ -2260,10 +2544,17 @@ Future<void> syncContactsFromBridge() async {
         requestData = {
           'model': _apiModelId,
           'messages': messages,
-          'max_tokens': _apiModelId.contains('reasoner') ? 4000 : 1024,
-          'stream': false,
+          'max_tokens': _maxTokens,
+          'temperature': _temperature,
+          'top_p': _topP,
+          'presence_penalty': _presencePenalty,
+          'frequency_penalty': _frequencyPenalty,
+          'stream': _streamEnabled,
         };
       }
+
+      // 临时调试：dump 完整 payload
+      await _dumpRequestPayload(requestData, tag: 'single');
 
       final response = await dio.post(
         provider.baseUrl,
