@@ -18,6 +18,7 @@ import 'pages/create_group_page.dart';
 import 'pages/group_chat_page.dart';
 import 'pages/persona_select_page.dart';
 import 'pages/preset_select_page.dart';
+import 'pages/world_select_page.dart';
 
 const double _chatBottomNavigationHeight = 74;
 const List<Color> _bubbleColorOptions = [
@@ -390,6 +391,26 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
             currentPresetName: widget.controller.getResolvedPresetName(widget.contact.id) ??
                 widget.controller.globalPresetName ??
                 '默认',
+            currentWorldBookSubtitle: () {
+              final books = widget.controller.worldBindings.chat[widget.contact.id] ?? const [];
+              return books.isEmpty ? '未绑定' : '已绑定 ${books.length} 个';
+            }(),
+            onWorldBookTap: () {
+              Navigator.pop(context);
+              final selected = widget.controller.worldBindings.chat[widget.contact.id] ?? const [];
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => WorldSelectPage(
+                    controller: widget.controller,
+                    title: '聊天世界书',
+                    selectedNames: selected,
+                    onConfirm: (names) =>
+                        widget.controller.setChatWorlds(widget.contact.id, names),
+                  ),
+                ),
+              );
+            },
             onPersonaTap: () async {
               Navigator.pop(context);
               final selectedId = await Navigator.push<String>(
@@ -2095,6 +2116,314 @@ class _ApiConfigCard extends StatelessWidget {
   }
 }
 
+class _GlobalWorldBookCard extends StatelessWidget {
+  const _GlobalWorldBookCard({required this.controller});
+
+  final ChatAppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final books = controller.worldBindings.appGlobal;
+        final subtitle = books.isEmpty ? '未绑定' : '已绑定 ${books.length} 个';
+
+        return FrostPanel(
+          padding: EdgeInsets.zero,
+          borderRadius: 24,
+          child: InkWell(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => WorldSelectPage(
+                    controller: controller,
+                    title: '全局世界书',
+                    selectedNames: books,
+                    onConfirm: (names) =>
+                        controller.setAppGlobalWorlds(names),
+                  ),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(24),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF34C759).withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(
+                      Icons.public_rounded,
+                      color: Color(0xFF34C759),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '全局世界书',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: palette.primaryText,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: palette.secondaryText,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: palette.secondaryText,
+                    size: 24,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _WorldBookListCard extends StatelessWidget {
+  const _WorldBookListCard({required this.controller});
+
+  final ChatAppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ChatPalette.of(context);
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final count = controller.worldBookList.length;
+        final subtitle = count == 0 ? '未加载' : '共 $count 本';
+        return FrostPanel(
+          padding: EdgeInsets.zero,
+          borderRadius: 24,
+          child: InkWell(
+            onTap: () {
+              if (controller.worldBookList.isEmpty) {
+                controller.fetchWorldBookList();
+              }
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => _WorldBookBrowsePage(controller: controller),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(24),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFB020).withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(
+                      Icons.library_books_outlined,
+                      color: Color(0xFFFFB020),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '世界书列表',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: palette.primaryText,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: palette.secondaryText,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: palette.secondaryText,
+                    size: 24,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 纯浏览的世界书列表页，点击条目查看词条
+class _WorldBookBrowsePage extends StatelessWidget {
+  const _WorldBookBrowsePage({required this.controller});
+
+  final ChatAppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('世界书列表')),
+      body: ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) {
+          final books = controller.worldBookList;
+          if (books.isEmpty) {
+            return const Center(child: Text('暂无世界书'));
+          }
+          return ListView.separated(
+            itemCount: books.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (context, i) {
+              final name = books[i];
+              return ListTile(
+                leading: const Icon(Icons.menu_book_outlined),
+                title: Text(name),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => _WorldBookDetailPage(
+                        controller: controller,
+                        name: name,
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _WorldBookDetailPage extends StatelessWidget {
+  const _WorldBookDetailPage({
+    required this.controller,
+    required this.name,
+  });
+
+  final ChatAppController controller;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(name)),
+      body: FutureBuilder(
+        future: controller.fetchWorldBookDetail(name),
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final detail = snap.data;
+          if (detail == null) {
+            return const Center(child: Text('加载失败'));
+          }
+          final entries = detail.entries;
+          if (entries.isEmpty) {
+            return const Center(child: Text('没有词条'));
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.all(12),
+            itemCount: entries.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, i) {
+              final e = entries[i];
+              final title = e.comment.isNotEmpty
+                  ? e.comment
+                  : (e.key.isNotEmpty ? e.key.first : '#${e.uid}');
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                          if (e.disable)
+                            const Text('已禁用',
+                                style: TextStyle(
+                                    color: Colors.redAccent, fontSize: 11))
+                          else if (e.constant)
+                            const Text('常驻',
+                                style: TextStyle(
+                                    color: Colors.green, fontSize: 11)),
+                        ],
+                      ),
+                      if (e.key.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '关键词: ${e.key.join(', ')}',
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.grey),
+                        ),
+                      ],
+                      const SizedBox(height: 6),
+                      Text(
+                        e.content,
+                        style: const TextStyle(fontSize: 13, height: 1.4),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _ApiConfigSheet extends StatefulWidget {
   const _ApiConfigSheet({required this.controller});
 
@@ -2574,6 +2903,8 @@ class _ProfileTab extends StatelessWidget {
         _ProfilePersonaCard(controller: controller),
         PresetCard(controller: controller),
         _ApiConfigCard(controller: controller),
+        _GlobalWorldBookCard(controller: controller),
+        _WorldBookListCard(controller: controller),
         const SizedBox(height: 18),
         FrostPanel(
           padding: const EdgeInsets.all(16),
