@@ -10,6 +10,7 @@ import '../widgets/avatar_widget.dart';
 import '../widgets/group_avatar_widget.dart';
 import 'persona_select_page.dart';
 import 'preset_select_page.dart';
+import 'world_select_page.dart';
 
 class GroupChatPage extends StatefulWidget {
   const GroupChatPage({
@@ -1168,7 +1169,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
                     ),
                     ListTile(
                       leading: Icon(
-                        Icons.menu_book_outlined,
+                        Icons.auto_stories_outlined,
                         color: Colors.green.shade300,
                       ),
                       title: Text(
@@ -1179,7 +1180,14 @@ class _GroupChatPageState extends State<GroupChatPage> {
                         ),
                       ),
                       subtitle: Text(
-                        '开发中',
+                        () {
+                          final books = controller
+                                  .worldBindings.group[widget.groupId] ??
+                              const [];
+                          return books.isEmpty
+                              ? '未绑定'
+                              : '已绑定 ${books.length} 个';
+                        }(),
                         style: TextStyle(
                           color: palette.secondaryText,
                           fontSize: 12,
@@ -1187,9 +1195,9 @@ class _GroupChatPageState extends State<GroupChatPage> {
                       ),
                       trailing: Icon(
                         Icons.chevron_right_rounded,
-                        color: palette.secondaryText.withValues(alpha: 0.4),
+                        color: palette.secondaryText,
                       ),
-                      onTap: null,
+                      onTap: () => _openWorldSelect(),
                     ),
                   ],
                 ),
@@ -1272,6 +1280,24 @@ class _GroupChatPageState extends State<GroupChatPage> {
               controller.getResolvedPresetName(widget.groupId),
           contactId: widget.groupId,
           controller: controller,
+        ),
+      ),
+    );
+  }
+
+  void _openWorldSelect() {
+    Navigator.pop(context);
+    final selected =
+        controller.worldBindings.group[widget.groupId] ?? const [];
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WorldSelectPage(
+          controller: controller,
+          title: '群聊世界书',
+          selectedNames: selected,
+          onConfirm: (names) =>
+              controller.setGroupWorlds(widget.groupId, names),
         ),
       ),
     );

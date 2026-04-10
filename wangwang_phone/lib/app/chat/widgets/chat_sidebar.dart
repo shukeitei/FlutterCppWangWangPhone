@@ -6,15 +6,19 @@ class ChatSidebar extends StatelessWidget {
     super.key,
     required this.currentPersonaName,
     required this.currentPresetName,
+    required this.currentWorldBookSubtitle,
     required this.onPersonaTap,
     required this.onPresetTap,
-    // 未来扩展：onWorldBookTap, onSummaryTap, onContextDebugTap
+    required this.onWorldBookTap,
+    // 未来扩展：onSummaryTap, onContextDebugTap
   });
 
   final String currentPersonaName;
   final String currentPresetName;
+  final String currentWorldBookSubtitle;
   final VoidCallback onPersonaTap;
   final VoidCallback onPresetTap;
+  final VoidCallback onWorldBookTap;
 
   @override
   Widget build(BuildContext context) {
@@ -59,14 +63,14 @@ class ChatSidebar extends StatelessWidget {
                       subtitle: currentPresetName,
                       onTap: onPresetTap,
                     ),
+                    _SidebarMenuItem(
+                      icon: Icons.auto_stories_outlined,
+                      iconColor: const Color(0xFF34C759),
+                      title: '世界书',
+                      subtitle: currentWorldBookSubtitle,
+                      onTap: onWorldBookTap,
+                    ),
                     // === 未来在这里追加新菜单项 ===
-                    // _SidebarMenuItem(
-                    //   icon: Icons.auto_stories_outlined,
-                    //   iconColor: const Color(0xFF34C759),
-                    //   title: '世界书',
-                    //   subtitle: '3个词条生效',
-                    //   onTap: onWorldBookTap,
-                    // ),
                     // _SidebarMenuItem(
                     //   icon: Icons.psychology_outlined,
                     //   iconColor: const Color(0xFFAF52DE),

@@ -13,8 +13,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'chat_api_models.dart';
 import 'chat_preset_models.dart';
+import 'chat_world_models.dart';
 
-const String kBridgeHost = 'http://192.168.1.247:7700';
+const String kBridgeHost = 'http://192.168.1.217:7700';
 
 class ChatAppController extends ChangeNotifier {
   ChatAppController.seeded({ChatSummaryStore? summaryStore})
@@ -53,6 +54,8 @@ class ChatAppController extends ChangeNotifier {
       ) {
     // 构造函数里只负责执行这两行指令
     syncContactsFromBridge();
+    loadWorldBindings();
+    fetchWorldBookList();
     fetchPersonas();
     loadGlobalPersona();
     fetchPresetList();
@@ -322,6 +325,7 @@ class ChatAppController extends ChangeNotifier {
   /// 群聊 AI 共用：构建最近的对话历史（OpenAI 格式）
   /// 注意：过滤掉 contactId == groupId 的系统消息（建群/重置提示）
   /// 否则 AI 会把它当成某个"旁白/系统"身份，之后模仿着返回非成员 name，匹配失败显示成群消息
+  /// AI 成员消息会加上 【角色名】 前缀，让模型能识别"谁说了哪句"
   List<Map<String, dynamic>> _buildGroupHistory(String groupId) {
     final history = messagesFor(groupId)
         .where((m) =>
@@ -335,9 +339,21 @@ class ChatAppController extends ChangeNotifier {
       for (final m in recent)
         {
           'role': m.sender == ChatMessageSender.user ? 'user' : 'assistant',
-          'content': (m.body as WordMessageBody).text,
+          'content': _formatGroupHistoryContent(m),
         },
     ];
+  }
+
+  /// 群聊历史消息格式化：AI 成员消息前加 【角色名】 前缀，用户消息保持原样
+  String _formatGroupHistoryContent(ChatMessage m) {
+    final text = (m.body as WordMessageBody).text;
+    if (m.sender == ChatMessageSender.user) return text;
+    try {
+      final name = contactById(m.contactId).name;
+      return '【$name】$text';
+    } catch (_) {
+      return text;
+    }
   }
 
   /// 群聊 AI 共用：发请求并取出纯文本回复（兼容 claude / openai 格式）
@@ -444,7 +460,36 @@ class ChatAppController extends ChangeNotifier {
             ? '1-3个角色'
             : '2-3个角色';
 
-    final systemPrompt = '''你是一个群聊模拟器。这个群聊叫「${group.name}」，有$memberCount位成员。
+    // 群聊世界书：APP全局 + 群聊 + 所有成员的角色专属
+    final worldInfo = await buildGroupWorldInfo(
+      groupId: groupId,
+      memberContactIds: group.memberContactIds,
+    );
+    final worldBeforeBlock =
+        worldInfo.before.isNotEmpty ? '${worldInfo.before}\n\n' : '';
+    final worldAfterBlock =
+        worldInfo.after.isNotEmpty ? '\n\n${worldInfo.after}' : '';
+
+    // E1: 用户身份（群聊用 group.name 当 key，找不到绑定时落到全局 persona）
+    String userName = '江栩栩';
+    String personaDesc = '';
+    try {
+      final resolved = await getResolvedPersona(group.name);
+      final pName = resolved['name'] as String? ?? '';
+      final pDesc = resolved['description'] as String? ?? '';
+      if (pName.isNotEmpty) userName = pName;
+      if (pDesc.isNotEmpty) personaDesc = pDesc;
+    } catch (_) {}
+    final personaBlock = personaDesc.isNotEmpty
+        ? '【用户身份】\n用户的名字是 $userName。\n$personaDesc\n\n'
+        : '【用户身份】\n用户的名字是 $userName。\n\n';
+
+    // E2b: 抽取预设里非 marker 的通用指令（越狱 / 输出格式 / 风格规则等）
+    final presetInstructions = extractPresetInstructions(groupId);
+    final presetBlock =
+        presetInstructions.isNotEmpty ? '【预设指令】\n$presetInstructions\n\n' : '';
+
+    var systemPrompt = '''$worldBeforeBlock$presetBlock$personaBlock你是一个群聊模拟器。这个群聊叫「${group.name}」，有$memberCount位成员。
 
 以下是每位成员的角色设定：
 ${memberProfiles.join('\n\n')}
@@ -452,15 +497,37 @@ ${memberProfiles.join('\n\n')}
 你的任务：
 1. 根据用户的最新消息和对话上下文，决定哪些角色会回复（选$replyCountHint）
 2. 只选和当前话题相关、有动机发言的角色
-3. 每个角色的回复要符合其性格和说话风格
-4. 回复要自然口语化，像真的群聊一样
+3. 多样性与轮换规则：
+   - 优先让最近 3 轮没发言过的角色发言，避免总是同一两个角色在对话
+   - 同一角色不要连续 3 轮都在说话
+   - 如果用户消息明确 @ 或提及某人，优先让那人发言
+   - 如果话题与某角色的世界观 / 记忆 / 人设密切相关，优先让那人发言
+4. 每个角色的回复要符合其性格和说话风格
+5. 回复要自然口语化，像真的群聊一样
+
+历史消息格式说明：
+历史里 assistant 的 content 以 【角色名】 开头表示那条是由哪个角色发出的。
+注意区分，不要把别人说过的话当成自己的立场继续。
 
 你必须且只能返回以下格式的 JSON 数组，不要返回任何其他内容：
 [{"name":"角色名","reply":"回复内容"},{"name":"角色名","reply":"回复内容"}]
 
-不要添加任何解释、前缀或 markdown 格式（不要 ```json 包裹），直接返回 JSON 数组。''';
+返回的 reply 只写正文，不要带 【角色名】 前缀。
+不要添加任何解释、前缀或 markdown 格式（不要 ```json 包裹），直接返回 JSON 数组。$worldAfterBlock''';
+
+    // {{user}} 替换；{{char}} 在群聊里没有单角色，留给 AI 自己按上下文判断
+    systemPrompt = systemPrompt
+        .replaceAll('{{user}}', userName)
+        .replaceAll('{{User}}', userName);
 
     final history = _buildGroupHistory(groupId);
+    _dumpGroupRequest(
+      tag: 'group-random',
+      groupId: groupId,
+      contactId: groupId,
+      systemPrompt: systemPrompt,
+      history: history,
+    );
     final rawReply = await _callGroupChatApi(
       dio: dio,
       systemPrompt: systemPrompt,
@@ -592,19 +659,89 @@ ${memberProfiles.join('\n\n')}
       return;
     }
 
-    final personaText = await _fetchCharacterPersona(dio, contact);
-    final systemPrompt = personaText.isNotEmpty
-        ? '你正在群聊「${group.name}」里扮演 ${contact.name}。\n\n$personaText\n\n请用 ${contact.name} 的语气和性格自然地回复群里的最新消息，简短自然。'
-        : '你是 ${contact.name}，正在群聊「${group.name}」里发言。请用自然的语气回复群里的最新消息。';
+    // E1: 用户身份（与单聊路径一致：先查角色绑定，否则全局 persona）
+    String userName = '江栩栩';
+    String personaDesc = '';
+    try {
+      final resolved = await getResolvedPersona(contact.name);
+      final pName = resolved['name'] as String? ?? '';
+      final pDesc = resolved['description'] as String? ?? '';
+      if (pName.isNotEmpty) userName = pName;
+      if (pDesc.isNotEmpty) personaDesc = pDesc;
+    } catch (_) {}
+
+    // 拉角色卡原始字段（给预设 marker 用）
+    String charDesc = '';
+    String charPersonality = '';
+    String charScenario = '';
+    try {
+      final charRes = await dio.get(
+        '$kBridgeHost/characters/${Uri.encodeComponent(contact.name)}',
+      );
+      final d = charRes.data;
+      charDesc = (d['description'] as String?) ?? '';
+      charPersonality = (d['personality'] as String?) ?? '';
+      charScenario = (d['scenario'] as String?) ?? '';
+    } catch (_) {}
+
+    // 注入世界书：APP全局 + 群聊 + 被召唤角色的角色专属
+    final worldInfo = await buildWorldInfoStrings(
+      contactId: targetContactId,
+      groupId: groupId,
+    );
+
+    // E2a: 复用单聊预设拼装路径，让群手动模式吃到完整预设
+    String systemPrompt;
+    if (_currentPresetDetail != null) {
+      systemPrompt = assembleSystemPrompt(
+        contactId: targetContactId,
+        charDescription: charDesc,
+        charPersonality: charPersonality,
+        charScenario: charScenario,
+        personaDescription: personaDesc,
+        worldInfoBefore: worldInfo.before,
+        worldInfoAfter: worldInfo.after,
+      );
+    } else {
+      // 没有预设：兜底用旧式拼接
+      final personaText = [
+        if (charDesc.isNotEmpty) charDesc,
+        if (charPersonality.isNotEmpty) '性格：$charPersonality',
+        if (charScenario.isNotEmpty) '场景：$charScenario',
+      ].join('\n');
+      systemPrompt = [
+        if (worldInfo.before.isNotEmpty) worldInfo.before,
+        if (personaText.isNotEmpty) personaText,
+        if (personaDesc.isNotEmpty) '【用户人设】\n$personaDesc',
+        if (worldInfo.after.isNotEmpty) worldInfo.after,
+      ].join('\n\n');
+    }
+
+    // 群语境补充（追加在预设 system 之后，不破坏预设结构）
+    const historyFormatNote =
+        '历史里 assistant 的 content 以 【角色名】 开头表示那条是由哪个角色发出的。注意区分哪些是你说过的、哪些是其他角色说的，不要把别人的语气和立场当成自己的。你的回复只写正文，不要带 【】 前缀。';
+    final groupContext =
+        '\n\n你当前正在群聊「${group.name}」里以 ${contact.name} 的身份发言，请用 ${contact.name} 的语气和性格自然地回复群里的最新消息，简短自然。\n\n$historyFormatNote';
+    systemPrompt = systemPrompt + groupContext;
+
+    // 占位符替换（{{user}} → 真实用户名，{{char}} → 被召唤角色）
+    systemPrompt = _replacePlaceholders(systemPrompt, contact.name, userName);
 
     final history = _buildGroupHistory(groupId);
+    _dumpGroupRequest(
+      tag: 'group-manual',
+      groupId: groupId,
+      contactId: targetContactId,
+      systemPrompt: systemPrompt,
+      history: history,
+    );
     final rawReply = await _callGroupChatApi(
       dio: dio,
       systemPrompt: systemPrompt,
       historyMessages: history,
       maxTokens: 800,
     );
-    final cleaned = _replacePlaceholders(rawReply, contact.name).trim();
+    final cleaned = _replacePlaceholders(rawReply, contact.name, userName).trim();
 
     final ts = DateTime.now();
     _appendMessage(
@@ -697,6 +834,11 @@ ${memberProfiles.join('\n\n')}
   final Map<String, String> _chatPresetOverrides = {}; // contactId → presetName
   final Map<String, Map<String, bool>> _chatPromptToggles = {}; // contactId → {identifier: enabled}
   final Map<String, bool> _globalPromptToggles = {}; // identifier → enabled
+
+  // ---- 世界书系统 ----
+  List<String> _worldBookList = [];
+  WorldBindings _worldBindings = WorldBindings();
+  final Map<String, WorldBookDetail> _worldBookCache = {};
 
   // ---- API 接口配置 ----
   String _apiProviderId = '';
@@ -1134,6 +1276,111 @@ Future<void> syncContactsFromBridge() async {
     } catch (_) {}
   }
 
+  // ==================== 世界书系统 ====================
+
+  List<String> get worldBookList => List.unmodifiable(_worldBookList);
+  WorldBindings get worldBindings => _worldBindings;
+
+  /// 拉取世界书列表
+  Future<void> fetchWorldBookList() async {
+    try {
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 5);
+      dio.options.receiveTimeout = const Duration(seconds: 10);
+      final res = await dio.get('$kBridgeHost/worlds');
+      _worldBookList = List<String>.from(res.data as List);
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  /// 拉取单个世界书详情（带缓存）
+  Future<WorldBookDetail?> fetchWorldBookDetail(String name) async {
+    if (_worldBookCache.containsKey(name)) return _worldBookCache[name];
+    try {
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 5);
+      dio.options.receiveTimeout = const Duration(seconds: 10);
+      final res = await dio
+          .get('$kBridgeHost/worlds/${Uri.encodeComponent(name)}');
+      final entries = (res.data['entries'] as List)
+          .map((e) => WorldBookEntry.fromJson(e as Map<String, dynamic>))
+          .toList();
+      final detail = WorldBookDetail(name: name, entries: entries);
+      _worldBookCache[name] = detail;
+      return detail;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// APP 全局世界书
+  void setAppGlobalWorlds(List<String> names) {
+    _worldBindings.appGlobal = List.from(names);
+    _saveWorldBindings();
+    notifyListeners();
+  }
+
+  /// 单聊聊天世界书
+  void setChatWorlds(String contactId, List<String> names) {
+    _worldBindings.chat[contactId] = List.from(names);
+    _saveWorldBindings();
+    notifyListeners();
+  }
+
+  /// 群聊全局世界书
+  void setGroupWorlds(String groupId, List<String> names) {
+    _worldBindings.group[groupId] = List.from(names);
+    _saveWorldBindings();
+    notifyListeners();
+  }
+
+  /// 角色专属世界书
+  void setCharacterWorlds(String contactId, List<String> names) {
+    _worldBindings.character[contactId] = List.from(names);
+    _saveWorldBindings();
+    notifyListeners();
+  }
+
+  /// 解析某次对话应该加载的全部世界书名称
+  List<String> resolveWorldBooks({
+    required String contactId,
+    String? groupId,
+  }) {
+    final books = <String>{};
+    // 1. APP 全局
+    books.addAll(_worldBindings.appGlobal);
+    // 2. 聊天世界书（单聊用 contactId，群聊用 groupId）
+    if (groupId != null) {
+      books.addAll(_worldBindings.group[groupId] ?? const []);
+    } else {
+      books.addAll(_worldBindings.chat[contactId] ?? const []);
+    }
+    // 3. 角色专属
+    books.addAll(_worldBindings.character[contactId] ?? const []);
+    return books.toList();
+  }
+
+  /// 持久化世界书绑定
+  Future<void> _saveWorldBindings() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/wangwang_world_bindings.json');
+      await file.writeAsString(jsonEncode(_worldBindings.toJson()));
+    } catch (_) {}
+  }
+
+  /// 启动时恢复世界书绑定
+  Future<void> loadWorldBindings() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/wangwang_world_bindings.json');
+      if (!await file.exists()) return;
+      final raw = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      _worldBindings = WorldBindings.fromJson(raw);
+      notifyListeners();
+    } catch (_) {}
+  }
+
   /// 解析某词条在某聊天中的最终开关状态
   /// 优先级：单聊覆盖 > 全局覆盖 > ST 原始开关
   bool resolvePromptEnabled(String contactId, String identifier) {
@@ -1154,6 +1401,126 @@ Future<void> syncContactsFromBridge() async {
     return false;
   }
 
+  /// 打印群聊请求上下文到 logcat
+  void _dumpGroupRequest({
+    required String tag,
+    required String groupId,
+    required String contactId,
+    required String systemPrompt,
+    required List<Map<String, dynamic>> history,
+  }) {
+    debugPrint('========== AI REQUEST DUMP [$tag] group=$groupId contact=$contactId ==========');
+    debugPrint('[$tag] resolved books: ${resolveWorldBooks(contactId: contactId, groupId: groupId)}');
+    debugPrint('[$tag] system-prompt length=${systemPrompt.length}');
+    for (final chunk in _splitForLog(systemPrompt)) {
+      debugPrint('[$tag][system] $chunk');
+    }
+    debugPrint('[$tag] history count=${history.length}');
+    for (var i = 0; i < history.length; i++) {
+      final m = history[i];
+      final role = m['role'] ?? '?';
+      final content = m['content']?.toString() ?? '';
+      for (final chunk in _splitForLog('[$i/$role] $content')) {
+        debugPrint('[$tag][history] $chunk');
+      }
+    }
+    debugPrint('========== END DUMP [$tag] ==========');
+  }
+
+  /// 把超长字符串拆成 800 字符一段，避免 Android logcat 截断
+  static List<String> _splitForLog(String s) {
+    const chunk = 800;
+    if (s.length <= chunk) return [s];
+    final out = <String>[];
+    for (var i = 0; i < s.length; i += chunk) {
+      out.add(s.substring(i, i + chunk > s.length ? s.length : i + chunk));
+    }
+    return out;
+  }
+
+  /// 群聊专用：汇总 APP全局 + 群聊世界书 + 所有成员的角色专属世界书
+  /// 软上限 [maxCharsPerSide] 防止大群 token 爆炸，超出直接截断
+  Future<({String before, String after})> buildGroupWorldInfo({
+    required String groupId,
+    required List<String> memberContactIds,
+    int maxCharsPerSide = 30000,
+  }) async {
+    // 1. 汇总所有涉及的世界书名称（dedupe）
+    final names = <String>{};
+    names.addAll(_worldBindings.appGlobal);
+    names.addAll(_worldBindings.group[groupId] ?? const []);
+    for (final cid in memberContactIds) {
+      names.addAll(_worldBindings.character[cid] ?? const []);
+    }
+    if (names.isEmpty) return (before: '', after: '');
+
+    // 2. 拉词条，按 position 分成 before/after
+    final beforeEntries = <WorldBookEntry>[];
+    final afterEntries = <WorldBookEntry>[];
+    for (final name in names) {
+      final detail = await fetchWorldBookDetail(name);
+      if (detail == null) continue;
+      for (final e in detail.entries) {
+        if (e.disable) continue;
+        if (e.content.isEmpty) continue;
+        if (e.position == 1) {
+          afterEntries.add(e);
+        } else {
+          beforeEntries.add(e);
+        }
+      }
+    }
+    beforeEntries.sort((a, b) => a.order.compareTo(b.order));
+    afterEntries.sort((a, b) => a.order.compareTo(b.order));
+
+    String before = beforeEntries.map((e) => e.content).join('\n\n');
+    String after = afterEntries.map((e) => e.content).join('\n\n');
+
+    // 3. 软上限截断
+    if (before.length > maxCharsPerSide) {
+      before = '${before.substring(0, maxCharsPerSide)}\n\n[...世界书内容过长，已截断]';
+    }
+    if (after.length > maxCharsPerSide) {
+      after = '${after.substring(0, maxCharsPerSide)}\n\n[...]';
+    }
+
+    return (before: before, after: after);
+  }
+
+  /// 解析某次对话要注入的世界书内容，按 position 分成 before/after 两段
+  /// position: 0 = worldInfoBefore, 1 = worldInfoAfter
+  /// 只拼入 disable=false 的词条，按 order 升序
+  Future<({String before, String after})> buildWorldInfoStrings({
+    required String contactId,
+    String? groupId,
+  }) async {
+    final names = resolveWorldBooks(contactId: contactId, groupId: groupId);
+    if (names.isEmpty) return (before: '', after: '');
+
+    final beforeEntries = <WorldBookEntry>[];
+    final afterEntries = <WorldBookEntry>[];
+    for (final name in names) {
+      final detail = await fetchWorldBookDetail(name);
+      if (detail == null) continue;
+      for (final e in detail.entries) {
+        if (e.disable) continue;
+        if (e.content.isEmpty) continue;
+        if (e.position == 1) {
+          afterEntries.add(e);
+        } else {
+          beforeEntries.add(e);
+        }
+      }
+    }
+    beforeEntries.sort((a, b) => a.order.compareTo(b.order));
+    afterEntries.sort((a, b) => a.order.compareTo(b.order));
+
+    return (
+      before: beforeEntries.map((e) => e.content).join('\n\n'),
+      after: afterEntries.map((e) => e.content).join('\n\n'),
+    );
+  }
+
   /// 核心方法：按预设拼装 system prompt
   /// 返回拼好的完整 prompt 文本
   String assembleSystemPrompt({
@@ -1162,15 +1529,19 @@ Future<void> syncContactsFromBridge() async {
     required String charPersonality,
     required String charScenario,
     required String personaDescription,
+    String worldInfoBefore = '',
+    String worldInfoAfter = '',
   }) {
     final detail = _currentPresetDetail;
     if (detail == null) {
       // 没有预设就用旧逻辑
       return [
+        if (worldInfoBefore.isNotEmpty) worldInfoBefore,
         if (charDescription.isNotEmpty) charDescription,
         if (charPersonality.isNotEmpty) '性格：$charPersonality',
         if (charScenario.isNotEmpty) '场景：$charScenario',
         if (personaDescription.isNotEmpty) '【用户人设】\n$personaDescription',
+        if (worldInfoAfter.isNotEmpty) worldInfoAfter,
       ].join('\n\n');
     }
 
@@ -1193,7 +1564,10 @@ Future<void> syncContactsFromBridge() async {
             if (charScenario.isNotEmpty) parts.add(charScenario);
           case 'personaDescription':
             if (personaDescription.isNotEmpty) parts.add(personaDescription);
-          // worldInfoBefore, worldInfoAfter → 后续世界书功能接入
+          case 'worldInfoBefore':
+            if (worldInfoBefore.isNotEmpty) parts.add(worldInfoBefore);
+          case 'worldInfoAfter':
+            if (worldInfoAfter.isNotEmpty) parts.add(worldInfoAfter);
           // chatHistory, dialogueExamples → 不拼进 system prompt
         }
         continue;
@@ -1205,6 +1579,25 @@ Future<void> syncContactsFromBridge() async {
       }
     }
 
+    return parts.join('\n\n');
+  }
+
+  /// 群聊随机模式专用：从当前预设里抽取所有 enabled 的非 marker 指令块。
+  /// 群聊里没有单一角色卡，无法复用 [assembleSystemPrompt]，但预设里那些
+  /// 通用的"越狱 / 输出格式 / 风格"指令对群聊同样有用，提取出来当群规则注入。
+  /// [contextId] 用于查 chat 级覆盖（可传 groupId）。
+  String extractPresetInstructions(String contextId) {
+    final detail = _currentPresetDetail;
+    if (detail == null) return '';
+    final parts = <String>[];
+    for (final orderItem in detail.promptOrder) {
+      if (!resolvePromptEnabled(contextId, orderItem.identifier)) continue;
+      final prompt = detail.findPrompt(orderItem.identifier);
+      if (prompt == null) continue;
+      if (prompt.isMarker) continue; // marker 词条群聊里没单角色数据，跳过
+      if (prompt.content.isEmpty) continue;
+      parts.add(prompt.content);
+    }
     return parts.join('\n\n');
   }
 
@@ -1768,6 +2161,9 @@ Future<void> syncContactsFromBridge() async {
         final personality = charData['personality'] as String? ?? '';
         final scenario = charData['scenario'] as String? ?? '';
 
+        // 拉取世界书内容
+        final worldInfo = await buildWorldInfoStrings(contactId: contactId);
+
         // 如果有预设，用预设拼装；否则走旧逻辑
         if (_currentPresetDetail != null) {
           systemPrompt = assembleSystemPrompt(
@@ -1776,13 +2172,17 @@ Future<void> syncContactsFromBridge() async {
             charPersonality: personality,
             charScenario: scenario,
             personaDescription: personaDesc,
+            worldInfoBefore: worldInfo.before,
+            worldInfoAfter: worldInfo.after,
           );
         } else {
           systemPrompt = [
+            if (worldInfo.before.isNotEmpty) worldInfo.before,
             if (desc.isNotEmpty) desc,
             if (personality.isNotEmpty) '性格：$personality',
             if (scenario.isNotEmpty) '场景：$scenario',
             if (personaDesc.isNotEmpty) '【用户人设】\n$personaDesc',
+            if (worldInfo.after.isNotEmpty) worldInfo.after,
           ].join('\n\n');
         }
 
@@ -1811,6 +2211,23 @@ Future<void> syncContactsFromBridge() async {
 
       // 第三步：根据当前 provider 发请求
       debugPrint('[_triggerAiReply] provider=$_apiProviderId model=$_apiModelId');
+      // === 调试：打印完整上下文 ===
+      debugPrint('========== AI REQUEST DUMP (contact=$contactId) ==========');
+      debugPrint('[world-info] resolved books: ${resolveWorldBooks(contactId: contactId)}');
+      debugPrint('[system-prompt] length=${systemPrompt.length}');
+      for (final chunk in _splitForLog(systemPrompt)) {
+        debugPrint('[system] $chunk');
+      }
+      debugPrint('[history] count=${recentHistory.length}');
+      for (var i = 0; i < recentHistory.length; i++) {
+        final m = recentHistory[i];
+        final role = m.sender == ChatMessageSender.user ? 'user' : 'assistant';
+        final text = (m.body as WordMessageBody).text;
+        for (final chunk in _splitForLog('[$i/$role] $text')) {
+          debugPrint('[history] $chunk');
+        }
+      }
+      debugPrint('========== END DUMP ==========');
       final provider = currentApiProvider!;
 
       // Claude API 格式不同，需要特殊处理

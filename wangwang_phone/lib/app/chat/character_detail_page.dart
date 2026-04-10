@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'chat_controller.dart';
 import 'chat_models.dart';
+import 'pages/world_select_page.dart';
 
 class CharacterDetailPage extends StatelessWidget {
   const CharacterDetailPage({
@@ -91,6 +92,14 @@ class CharacterDetailPage extends StatelessWidget {
                     _buildSection(
                       title: '角色设定',
                       child: _PersonaSummaryCard(text: contact.personaSummary),
+                    ),
+                    const SizedBox(height: 24),
+                    _buildSection(
+                      title: '世界书绑定',
+                      child: _WorldBindingCard(
+                        controller: controller,
+                        contact: contact,
+                      ),
                     ),
                     const SizedBox(height: 40),
                     _buildResetButton(context),
@@ -265,6 +274,96 @@ class _PersonaSummaryCardState extends State<_PersonaSummaryCard> {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _WorldBindingCard extends StatelessWidget {
+  const _WorldBindingCard({required this.controller, required this.contact});
+
+  final ChatAppController controller;
+  final ChatContact contact;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        final books =
+            controller.worldBindings.character[contact.id] ?? const [];
+        final subtitle = books.isEmpty ? '未绑定' : '已绑定 ${books.length} 个';
+        return InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => WorldSelectPage(
+                  controller: controller,
+                  title: '角色世界书',
+                  selectedNames: books,
+                  onConfirm: (names) =>
+                      controller.setCharacterWorlds(contact.id, names),
+                ),
+              ),
+            );
+          },
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A26),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.14),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.auto_stories_outlined,
+                    color: Colors.greenAccent,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '角色专属世界书',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: Colors.white38,
+                  size: 22,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
